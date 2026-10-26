@@ -998,7 +998,13 @@ const wss = new WebSocketServer({
     done(true)
   },
 })
-server.listen(PORT)
+// Loopback unless told otherwise. With no host, Node binds every interface,
+// and on a machine with a public address that puts this socket on the
+// internet — where the Origin check is no defence, since a non-browser client
+// sets whatever Origin it likes. Anyone who needs it reachable from elsewhere
+// can say so with JARVIS_BRIDGE_HOST, ideally from behind something that
+// authenticates.
+server.listen(PORT, process.env.JARVIS_BRIDGE_HOST ?? '127.0.0.1')
 
 console.log(`[jarvis] bridge listening on ws://localhost:${PORT}`)
 console.log(

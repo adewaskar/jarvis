@@ -179,6 +179,57 @@ function holdFor(text: string): number {
   return SETTLE_MS
 }
 
+/**
+ * A transcript as the comparison sees it: one entry per word, with the word
+ * lowercased and stripped to letters and digits, and the original spelling
+ * kept beside it for output. Comparing on the key is what lets "What time is
+ * it?" be recognised as the start of "What time is it in Tokyo?" — the
+ * transcriber punctuates every final result, so the raw strings never match.
+ */
+type Token = { raw: string; key: string }
+const tokens = (s: string): Token[] =>
+  s
+    .trim()
+    .split(/\s+/)
+    .map((raw) => ({ raw, key: raw.toLowerCase().replace(/[^\p{L}\p{M}\p{N}']+/gu, '') }))
+    .filter((t) => t.key)
+
+const startsWithKeys = (list: Token[], prefix: Token[]) =>
+  prefix.length <= list.length && prefix.every((t, i) => t.key === list[i].key)
+
+/**
+ * Join a new transcript onto what is held, without repeating the overlap.
+ *
+ * A transcriber does not only append. It re-emits: "what's the weather"
+ * becomes "what's the weather in London tomorrow" a moment later, as a fresh
+ * final result containing everything it already sent. Concatenating blindly
+ * doubles the opening words and the model is asked about "what's the weather
+ * what's the weather in London" — so a transcript that extends what is held
+ * replaces it, and a partial overlap is stitched at the seam.
+ */
+function mergeTranscript(held: string, incoming: string): string {
+  if (!held) return incoming
+  const a = tokens(held)
+  const b = tokens(incoming)
+  if (!a.length) return incoming
+  if (!b.length) return held
+  // A re-emission of the same thought, longer or identical.
+  if (startsWithKeys(b, a)) return incoming
+  // The same thought again, shorter — what is held already ends with it.
+  if (b.length <= a.length && startsWithKeys(a.slice(a.length - b.length), b)) return held
+  // The tail of what is held is the head of what arrived: stitch, don't repeat.
+  // At least four letters of overlap, so a shared "in" or "the" does not
+  // swallow a real continuation.
+  for (let k = Math.min(a.length, b.length); k >= 1; k--) {
+    const tail = a.slice(a.length - k)
+    if (tail.map((t) => t.key).join('').length >= 4 && startsWithKeys(b, tail)) {
+      const lead = held.trim().replace(/[\s.!?,;:…]+$/u, '')
+      return `${lead} ${b.slice(k).map((t) => t.raw).join(' ')}`.replace(/\s+/g, ' ').trim()
+    }
+  }
+  return `${held} ${incoming}`.replace(/\s+/g, ' ').trim()
+}
+
 type Assembler = {
   /** Add a transcript. `active` is true if the user is audibly still going. */
   feed: (text: string, active: boolean) => void
@@ -213,7 +264,7 @@ function makeAssembler(h: {
   return {
     feed(text, active) {
       if (!text.trim()) return
-      held = `${held} ${text}`.replace(/\s+/g, ' ').trim()
+      held = mergeTranscript(held, text.trim())
       if (!firstAt) firstAt = Date.now()
       // The caption shows the whole thought as it assembles, not just the
       // fragment that happened to arrive last.
@@ -254,10 +305,14 @@ function makeAssembler(h: {
 // Hearing himself
 // ---------------------------------------------------------------------------
 
+// Letters of any script, not just a-z. Stripping everything else leaves a
+// non-Latin transcript as an empty bag of words, and isEcho reads "nothing
+// was said" as proof of an echo — so in any language but English, everything
+// the user says while he is talking is silently discarded as his own voice.
 const norm = (s: string) =>
   s
     .toLowerCase()
-    .replace(/[^a-z0-9' ]+/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}' ]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 

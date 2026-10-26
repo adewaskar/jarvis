@@ -46,8 +46,18 @@ type Speaker = {
 // ---------------------------------------------------------------------------
 
 let speaking = ''
-let recent = ''
-let recentUntil = 0
+
+/**
+ * Every sentence spoken in the recent past, not merely the last one.
+ *
+ * His answers run to several sentences, and the microphone returns them as one
+ * long transcript assembled across all of them. Compared against a single
+ * sentence that transcript shares too few words to look like an echo, so it is
+ * handed to the model as a fresh question — and he interrupts his own answer
+ * to respond to it. Keeping the whole recent utterance is what makes the
+ * comparison meaningful.
+ */
+let recentParts: { text: string; until: number }[] = []
 
 /** Recognition lags the speakers by a few hundred milliseconds, so a sentence
  *  keeps arriving at the microphone well after it has finished playing. */
@@ -118,8 +128,7 @@ function setSpeaking(text: string) {
     return
   }
   if (speaking) {
-    recent = speaking
-    recentUntil = Date.now() + ECHO_TAIL_MS
+    recentParts.push({ text: speaking, until: Date.now() + ECHO_TAIL_MS })
   }
   speaking = ''
 }
@@ -134,8 +143,12 @@ function setSpeaking(text: string) {
  * one lands. See `isEcho` in voice.ts.
  */
 export function speakingNow(): string {
-  const tail = Date.now() < recentUntil ? recent : ''
-  return `${speaking} ${tail}`.trim()
+  const now = Date.now()
+  recentParts = recentParts.filter((p) => p.until > now)
+  return [speaking, ...recentParts.map((p) => p.text)]
+    .filter(Boolean)
+    .join(' ')
+    .trim()
 }
 
 // ---------------------------------------------------------------------------
