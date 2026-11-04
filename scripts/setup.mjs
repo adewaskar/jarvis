@@ -1,10 +1,11 @@
 #!/usr/bin/env node
+import { diagnoseProvider } from '../bridge/providers/create.mjs'
 // JARVIS preflight — a friendly, advisory check you run with `npm run setup`.
 //
 // It changes nothing and installs nothing. It looks at your machine, tells you
 // what is ready and what is missing, and prints the two commands that start
 // JARVIS. Every check degrades to a single friendly line if something is not
-// there, and the script always exits 0 — it is advice, not a gate.
+// there. An unknown provider exits with status 1; missing local dependencies are advisory.
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -35,23 +36,11 @@ try {
   line(warn, 'Could not read the Node.js version. JARVIS needs Node 20 or newer.');
 }
 
-// --- Claude CLI on PATH ---------------------------------------------------
-let claudeFound = false;
-try {
-  const res = spawnSync('claude', ['--version'], { encoding: 'utf8', timeout: 10000 });
-  if (res.status === 0 && res.stdout) {
-    claudeFound = true;
-    line(tick, `Claude CLI found: ${res.stdout.trim()}`);
-  }
-} catch {
-  // ignore — handled below
-}
-if (!claudeFound) {
-  line(warn, 'Claude CLI not found on your PATH.');
-  line(info, 'Install it: npm install -g @anthropic-ai/claude-code');
-  line(info, '  (or the platform installer at https://docs.claude.com/en/docs/claude-code)');
-  line(info, 'Then run `claude` once and complete login. The bridge uses that login — no API key needed.');
-}
+// Provider requirements are isolated and checked only for the selected provider.
+const providerId = process.env.JARVIS_PROVIDER ?? 'claude';
+const diagnosis = diagnoseProvider(providerId, { run: spawnSync });
+line(diagnosis.ok ? tick : warn, diagnosis.message);
+if (providerId !== 'claude') { process.exitCode = 1; }
 
 // --- ~/.claude.json and MCP servers --------------------------------------
 const claudeJsonPath = join(homedir(), '.claude.json');

@@ -4,7 +4,7 @@ import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
-import { useStore } from './store'
+import { useStore, type OrbitObject } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
 import { createSpeaker, cycleVoice, currentVoiceName } from './lib/tts'
 import * as sfx from './lib/sfx'
@@ -187,8 +187,8 @@ export default function App() {
       // The bridge keeps conversation state in its own session, so history is
       // only threaded through on the direct path.
       if (!usingBridge) {
-        history.current.push({ role: 'user', content: said })
-        history.current.push({ role: 'assistant', content: text || '…' })
+        history.current.push({ role: 'user', content: [{ type: 'text', text: said }] })
+        history.current.push({ role: 'assistant', content: [{ type: 'text', text: text || '…' }] })
         if (history.current.length > 16) {
           history.current = history.current.slice(-16)
         }
@@ -432,7 +432,7 @@ export default function App() {
           s.applyUi(args)
           break
         case 'orbit':
-          if (a.action === 'add') s.addOrbit(args)
+          if (a.action === 'add') s.addOrbit(args as unknown as OrbitObject)
           else if (a.action === 'remove') s.removeOrbit(String(a.id))
           else s.clearOrbits()
           break

@@ -82,6 +82,20 @@ Click **INITIALISE**, allow the microphone when asked, and say **"Hey Jarvis"**.
 
 ---
 
+## Agent providers and architecture
+
+The bridge selects its agent with `JARVIS_PROVIDER=claude` (the default and only
+production provider currently implemented). Conversation orchestration, tools,
+permissions and transport use application-owned contracts and injected adapters.
+Codex and other providers can be added without changing the conversation or HUD.
+See [provider architecture](docs/architecture/providers.md) for the contracts,
+capability matrix, limitations and extension guide. `VITE_BACKEND` continues to
+select the frontend transport independently.
+
+Run `npm test` for local contract/integration tests without model credentials,
+then `npm run lint` and `npm run build`. Tests require a Node version compatible
+with the installed Vite and tsx dependencies.
+
 ## How it works
 
 JARVIS is two processes. The browser is the face and the voice; the bridge is
@@ -108,7 +122,7 @@ WebSocket (plus a few HTTP endpoints) on `ws://localhost:8787`.
 rest. The bridge can. And because it is the Agent SDK, it authenticates off your
 existing Claude Code login: no API key, billed to that same Claude account.
 
-**The model.** `claude-opus-5` at effort `medium` by default. Override with the
+**The model.** `claude-opus-5` at effort `high` by default. Override with the
 `JARVIS_MODEL` and `JARVIS_EFFORT` environment variables. On startup the bridge
 prints its choice, e.g. `[jarvis] model claude-opus-5 · effort medium`.
 
@@ -225,8 +239,9 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | Variable | Default | Effect |
 |---|---|---|
 | `JARVIS_BRIDGE_PORT` | `8787` | Port for the WebSocket + HTTP endpoints |
+| `JARVIS_PROVIDER` | `claude` | Agent adapter; unknown IDs fail explicitly |
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
-| `JARVIS_EFFORT` | `medium` | Reasoning effort |
+| `JARVIS_EFFORT` | `high` | Reasoning effort |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
 | `JARVIS_ALLOWED_ORIGINS` | local dev | Extra WebSocket origins to accept |
 | `JARVIS_ALLOW_NO_ORIGIN` | off | Accept connections with no `Origin` header |

@@ -1,4 +1,4 @@
-import type { AskHandlers } from './anthropic'
+import type { AskHandlers } from '../../shared/agent'
 import type { Blade, Panel } from '../store'
 import { BRIDGE_WS_URL } from '../config'
 
@@ -39,6 +39,7 @@ type Frame = {
 
 /** Every question gets an id so its answer can be told from anyone else's. */
 let askSeq = 0
+let activeAsk: string | null = null
 
 let socket: WebSocket | null = null
 let connecting: Promise<WebSocket> | null = null
@@ -167,6 +168,8 @@ function dispatch(ws: WebSocket) {
     } catch {
       return
     }
+
+    if (msg.ask && msg.ask !== activeAsk) return
 
     if (msg.type === 'ready') {
       // The bridge announces immediately on connect from Claude Code's config,
@@ -365,6 +368,7 @@ export async function ask(
   }
 
   const id = `a${++askSeq}`
+  activeAsk = id
   const tools: string[] = []
   let text = ''
 
@@ -374,6 +378,7 @@ export async function ask(
 
     const cleanup = () => {
       done = true
+      if (activeAsk === id) activeAsk = null
       pending = null
       clearTimeout(timer)
       ws.removeEventListener('message', onMessage)
@@ -484,6 +489,7 @@ export async function ask(
  * transcript keeps the half-sentence the user actually heard.
  */
 export function cancel(): void {
+  activeAsk = null
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'interrupt' }))
   }

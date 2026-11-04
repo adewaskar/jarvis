@@ -1,0 +1,4 @@
+- Última task feita: Task 17: Verificar fronteiras e atualizar documentação.
+- Arquivo de descrição da task: [17-desacoplamento.md](17-desacoplamento.md).
+- Arquivo de descrição do plano: [plano](../plans/2026-11-03-desacoplamento-de-provedores.md).
+- Descrição das mudanças: Arquitetura documentada e revisada; 30 testes passaram (incluindo WebSocket real), lint/build e sintaxe verificados. Voz/câmera/login reais pendentes.
