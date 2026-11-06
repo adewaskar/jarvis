@@ -112,6 +112,19 @@ existing Claude Code login: no API key, billed to that same Claude account.
 `JARVIS_MODEL` and `JARVIS_EFFORT` environment variables. On startup the bridge
 prints its choice, e.g. `[jarvis] model claude-opus-5 · effort medium`.
 
+**Alternative CLI.** To use a Claude Code-compatible executable such as
+`fcc-claude`, set `JARVIS_CLAUDE_EXECUTABLE` to its full path before starting
+JARVIS. In PowerShell:
+
+```powershell
+$env:JARVIS_CLAUDE_EXECUTABLE = (Get-Command fcc-claude).Source
+npm start
+```
+
+The Agent SDK launches this executable with its own CLI arguments, so this only
+works if `fcc-claude` supports the Claude Code CLI protocol. If the variable is
+unset, the SDK's bundled executable is used.
+
 ### The voice pipeline
 
 The loop is designed so that nothing silently dies and barge-in feels natural.
@@ -226,6 +239,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 |---|---|---|
 | `JARVIS_BRIDGE_PORT` | `8787` | Port for the WebSocket + HTTP endpoints |
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
+| `JARVIS_CLAUDE_EXECUTABLE` | SDK bundled CLI | Path to a compatible Claude Code executable |
 | `JARVIS_EFFORT` | `medium` | Reasoning effort |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
 | `JARVIS_ALLOWED_ORIGINS` | local dev | Extra WebSocket origins to accept |

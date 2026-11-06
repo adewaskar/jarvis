@@ -1236,6 +1236,11 @@ wss.on('connection', (socket) => {
       // The cost is that MCP servers stop being discovered too, which is why
       // mcpServers above passes them in by hand.
       settingSources: [],
+      // Optional Claude Code-compatible executable, such as fcc-claude.
+      // When unset, the SDK uses its bundled executable.
+      ...(process.env.JARVIS_CLAUDE_EXECUTABLE
+        ? { pathToClaudeCodeExecutable: process.env.JARVIS_CLAUDE_EXECUTABLE }
+        : {}),
       // Stated explicitly, and it has to be.
       //
       // With no `model` here the SDK falls back to its own default, which on
