@@ -12,7 +12,27 @@
 
 import { spawn } from 'node:child_process'
 import process from 'node:process'
-import { cpSync, existsSync, mkdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+
+/**
+ * Put .env.local into the environment before the children are spawned.
+ *
+ * Vite reads that file on its own, but only for VITE_ names, and the bridge
+ * reads none of it — it expects ELEVENLABS_API_KEY in its shell environment.
+ * So a key written where the docs point produces a JARVIS that quietly keeps
+ * using the browser voice. Loading the file here makes both halves agree, and
+ * a variable already set in the shell still wins.
+ */
+function loadEnvLocal() {
+  if (!existsSync('.env.local')) return
+  for (const line of readFileSync('.env.local', 'utf8').split('\n')) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
+    if (!match) continue // comment or blank
+    const [, name, raw] = match
+    const value = raw.trim().replace(/^(['"])(.*)\1$/, '$2')
+    if (value && process.env[name] === undefined) process.env[name] = value
+  }
+}
 
 /**
  * Put MediaPipe's WebAssembly where the page can actually load it.
@@ -43,6 +63,8 @@ function vendorWasm() {
     console.warn(`  could not vendor the hand-tracking runtime: ${err.message}`)
   }
 }
+
+loadEnvLocal()
 
 const writes = process.argv.includes('--writes')
 
