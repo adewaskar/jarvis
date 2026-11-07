@@ -150,10 +150,13 @@ function hostAllowed(host) {
  * click and the model can't pause for one. So the bridge decides.
  *
  * Read-only and generative tools run freely. Anything that writes to disk,
- * runs a shell, or changes the world waits for JARVIS_ALLOW_WRITES=1. Start
+ * runs a shell, or changes the world waits for JARVIS_ALLOW_WRITES=1 (or the
+ * --writes flag, which `npm run bridge:writes` passes — a flag works in every
+ * shell, where an inline env assignment does not run on Windows). Start
  * without it, and turn it on once you trust what you're demoing.
  */
-const ALLOW_WRITES = process.env.JARVIS_ALLOW_WRITES === '1'
+const ALLOW_WRITES =
+  process.env.JARVIS_ALLOW_WRITES === '1' || process.argv.includes('--writes')
 
 /**
  * The orchestrator model. Override with JARVIS_MODEL to trade quality for pace
