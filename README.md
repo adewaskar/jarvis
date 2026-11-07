@@ -144,8 +144,9 @@ configuration, and can drive his own interface.
 
 ### Your tools
 
-Every server in your `~/.claude.json` is handed to the SDK explicitly. Depending
-on what you have installed, that is roughly:
+Every server in your `~/.claude.json` is handed to the SDK explicitly, or only the
+ones you name in `JARVIS_MCP_SERVERS`. Depending on what you have installed, that
+is roughly:
 
 - **Web & search** — `exa`, `serper`, `serpapi`
 - **Images & video** — `higgsfield`, `openrouter-image`, `palmier-pro`
@@ -228,20 +229,24 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | Variable | Default | Effect |
 |---|---|---|
 | `JARVIS_BRIDGE_PORT` | `8787` | Port for the WebSocket + HTTP endpoints |
+| `JARVIS_BRIDGE_HOST` | `127.0.0.1` | Interface to listen on. Any other address puts the agent on your network |
+| `JARVIS_ALLOWED_HOSTS` | none | Extra hostnames the bridge answers to; a request for any other name gets a 403 |
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
 | `JARVIS_EFFORT` | `medium` | Reasoning effort |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
 | `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
 | `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
-| `JARVIS_DISABLE` | — | Comma-separated capabilities to leave out: `browser`, `camera`, `interface` |
+| `JARVIS_DISABLE` | none | Comma-separated capabilities to leave out: `browser`, `camera`, `interface` |
 | `JARVIS_ALLOWED_ORIGINS` | local dev | Extra WebSocket origins to accept |
 | `JARVIS_ALLOW_NO_ORIGIN` | off | Accept connections with no `Origin` header |
 | `JARVIS_WORKSPACE` | `~/.jarvis/workspace` | The agent's working directory; file tools are confined to it and the temp directory |
-| `JARVIS_FILE_ROOTS` | — | Extra folders the file tools and the `/file` endpoint may use |
+| `JARVIS_FILE_ROOTS` | none | Extra folders the file tools and the `/file` endpoint may use |
 | `JARVIS_KEEP_TRANSCRIPTS` | off | `1` keeps the SDK's session transcripts in `~/.claude/projects` |
 | `JARVIS_CLAUDE_EXECUTABLE` | bundled CLI | Run the agent through this executable instead, e.g. a sandbox wrapper that execs the real CLI |
-| `JARVIS_VOICE_ID` | — | ElevenLabs voice id |
-| `ELEVENLABS_API_KEY` | — | Optional; enables the ElevenLabs voice + Scribe |
+| `JARVIS_CHROME_PIPE` | none | WSL only: the Windows pipe name the browser relay connects to |
+| `JARVIS_DEBUG` | off | `1` logs every agent message to the bridge terminal, answer text and tool calls included |
+| `JARVIS_VOICE_ID` | none | ElevenLabs voice id |
+| `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe |
 
 ### Frontend (`.env.local`)
 
@@ -271,10 +276,17 @@ the next boot, and both the voice and transcription upgrade automatically.
 
 The tool gate starts **read-only**. Search, generation and lookups run freely;
 anything effectful — send, tap, delete, install, pay — is denied. Voice is a poor
-interface for a confirmation dialog, so the decision is made ahead of time in
-`decideTool()` in `bridge/server.mjs`, not at the moment of use. The bridge sets
+interface for a confirmation dialog, so the decision is made ahead of time, in
+`decideTool()` in `bridge/policy.mjs`. The bridge sets
 `settingSources: []`, which makes its own gate the only authority — filesystem
 settings and any global `bypassPermissions` cannot override it.
+
+A `PreToolUse` hook applies that policy to every call, including the reads the
+Claude Code CLI would otherwise approve by itself. In read-only mode the agent
+has no shell, and its file tools reach only its workspace (`~/.jarvis/workspace`),
+the temp directory and any folders in `JARVIS_FILE_ROOTS`. Paths that hold
+credentials, such as `~/.ssh`, `~/.claude` and `.env` files, stay refused even
+inside those folders.
 
 To allow effectful tools (phone, browser driving, sending), run the bridge this
 way instead:
@@ -282,6 +294,11 @@ way instead:
 ```bash
 npm run bridge:writes
 ```
+
+The script passes `--writes` to the bridge, so it works in Windows `cmd` and
+PowerShell too. With `npm start`, use `npm start -- --writes`. Writes add `Bash`,
+`Write`, `Edit` and `NotebookEdit` to the agent's tools. The file tools stay
+inside the same folders; the shell can reach anything your user account can.
 
 > Read `decideTool()` before you do. *"Hey Jarvis, clean up my downloads folder"*
 > means something rather different with writes enabled.
@@ -298,7 +315,16 @@ Press **T** for a one-line audio self-test.
 window** (not an embedded preview), and you must have **allowed the microphone**.
 
 **Bridge not reachable.** Check that `npm run bridge` is still running in its
-terminal, and that nothing else is holding port `8787`.
+terminal, and that nothing else is holding port `8787`. If the port is taken,
+the bridge says so in one line at startup and exits. It listens on `127.0.0.1`
+only. Reaching it from another machine takes `JARVIS_BRIDGE_HOST` and
+`JARVIS_ALLOWED_HOSTS`, and your own authentication in front of it first.
+
+**Browser control on Windows.** The bridge finds the Claude extension's named
+pipe, `\\.\pipe\claude-mcp-browser-bridge-<user>`, by itself. If the boot log
+says the extension is not running, open Chrome with the extension signed in.
+Each browser request looks for the pipe again, so the bridge does not need a
+restart.
 
 **Running the bridge in WSL, with Chrome on Windows.** Browser control works:
 the Windows native host exposes a named pipe rather than a Unix socket, and the
@@ -309,15 +335,37 @@ not forward it.
 
 ---
 
+## Tests
+
+`npm test` runs the bridge's tests with Node's built-in runner. They cover the
+network binding, the tool policy, the MCP server allowlist and the WSL browser
+relay, which runs only under WSL. The network and allowlist tests start the
+bridge on a random loopback port, and none of the tests opens an agent session.
+
+---
+
 ## Security
 
-All of this lives in `bridge/server.mjs`:
+The bridge's defences live in `bridge/server.mjs` and `bridge/policy.mjs`:
 
+- It listens on `127.0.0.1` and answers only requests addressed to `localhost`,
+  `127.0.0.1` or `[::1]`, which blocks DNS rebinding.
 - The WebSocket accepts only local dev origins (add more with
   `JARVIS_ALLOWED_ORIGINS`).
 - `/file`, `/img` and `/media` validate the scheme, confine to allowed roots,
   resolve the real path, and refuse private and loopback addresses (SSRF guard).
 - The tool gate (`decideTool`) is default-deny for effectful MCP tools.
+- A `PreToolUse` hook enforces the tool policy on every call. File tools stay
+  inside the workspace, the temp directory and `JARVIS_FILE_ROOTS`, and
+  `WebFetch` cannot reach loopback, LAN or cloud metadata addresses.
+- claude.ai account connectors stay out of the session unless
+  `JARVIS_ACCOUNT_CONNECTORS=1`, and `JARVIS_MCP_SERVERS` narrows which
+  `~/.claude.json` servers the agent gets.
+- Session transcripts are written to `~/.claude/projects` only when
+  `JARVIS_KEEP_TRANSCRIPTS=1`.
+- `JARVIS_DISABLE` removes browser control, the camera or the interface tools
+  entirely, and `JARVIS_CLAUDE_EXECUTABLE` can run the agent inside a sandbox
+  wrapper.
 - A strict CSP in `index.html`; model-authored panel HTML is sanitised.
 
 ---
