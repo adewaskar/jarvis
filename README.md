@@ -161,8 +161,11 @@ A few things you can say:
 - *"Open my GitHub notifications."*
 
 > **Note on account connectors.** Servers you added through your **claude.ai
-> account** are not stored on disk, so the bridge cannot see them — it works from
-> the servers in `~/.claude.json` (about 14), not the claude.ai ones.
+> account** (mail, drive, calendar and other account connectors) are not in `~/.claude.json`,
+> but the CLI fetches them on its own and they join the session from the second
+> turn. The bridge keeps them out by default; set `JARVIS_ACCOUNT_CONNECTORS=1`
+> to let them in, and `JARVIS_MCP_SERVERS` to choose which `~/.claude.json`
+> servers JARVIS gets.
 
 ### JARVIS controls the interface
 
@@ -228,6 +231,8 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
 | `JARVIS_EFFORT` | `medium` | Reasoning effort |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
+| `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
+| `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
 | `JARVIS_ALLOWED_ORIGINS` | local dev | Extra WebSocket origins to accept |
 | `JARVIS_ALLOW_NO_ORIGIN` | off | Accept connections with no `Origin` header |
 | `JARVIS_WORKSPACE` | `~/.jarvis/workspace` | The agent's working directory; file tools are confined to it and the temp directory |
