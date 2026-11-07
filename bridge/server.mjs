@@ -22,11 +22,18 @@ import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { homedir, tmpdir } from 'node:os'
-import { readFileSync, realpathSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { probeUrl, renderPage } from './page.mjs'
+import {
+  builtinTools,
+  checkToolUse,
+  decideTool as decidePolicy,
+  fetchTargetProblem,
+  fileRoots,
+} from './policy.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
 
@@ -172,26 +179,6 @@ const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5'
 const EFFORT = process.env.JARVIS_EFFORT ?? 'high'
 
 /**
- * Both spellings of every renamed built-in are listed on purpose. The SDK
- * presents several tools to the model under newer names — Task is Agent,
- * BashOutput is TaskOutput, KillShell is TaskStop, and the MCP resource tools
- * gained a "Tool" suffix — so a set holding only the old names never matches
- * and the tool falls through to the write branch, which is the opposite of
- * what these lists mean. Keep both until the old names are certainly gone.
- */
-const READ_ONLY_BUILTINS = new Set([
-  'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite',
-  'Task', 'Agent', 'ToolSearch',
-  'ListMcpResources', 'ListMcpResourcesTool',
-  'ReadMcpResource', 'ReadMcpResourceTool',
-  'BashOutput', 'TaskOutput',
-])
-const WRITE_BUILTINS = new Set([
-  'Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
-  'KillShell', 'TaskStop',
-])
-
-/**
  * Every MCP server Claude Code has configured, read out of its own config.
  *
  * This does two jobs. The HUD wants the names while the boot animation plays,
@@ -202,8 +189,9 @@ const WRITE_BUILTINS = new Set([
  * own, so handing them over explicitly is what keeps the local stdio ones —
  * the whole reason the bridge exists — in play.
  *
- * Only the global block and the home-directory project scope, because
- * homedir() is our cwd. That makes the list a close but not exact match for
+ * Only the global block and the home-directory project scope — the scope
+ * `claude` itself applies when run from home, which is where these servers
+ * have always been picked up from. That makes the list a close but not exact match for
  * the agent's own: the 'ready' sent on connect comes from here and the second
  * one, sent from the init message a turn later, carries live status. Expect
  * the two to differ, and treat the later one as authoritative.
@@ -225,119 +213,60 @@ function configuredServers() {
 
 const MCP_SERVERS = configuredServers()
 
-/** MCP tools arrive as `mcp__<server>__<tool>`. */
-const mcpServerOf = (toolName) =>
-  toolName.startsWith('mcp__') ? toolName.split('__')[1] : null
-
-/** The tool half, which can itself contain underscores: `mcp__x__a__b` -> `a__b`. */
-const mcpToolOf = (toolName) => toolName.split('__').slice(2).join('__')
+/**
+ * The tool policy lives in policy.mjs so it can be tested on its own. Bound to
+ * this process's write setting once, so everything below reads as before.
+ */
+const decideTool = (name) => decidePolicy(name, ALLOW_WRITES)
 
 /**
- * MCP policy, and why it is shaped this way.
+ * The agent's working directory, and the only folder its file tools may use
+ * besides the temp directory and JARVIS_FILE_ROOTS.
  *
- * A short list of "servers that can change things" is the wrong default,
- * because it is a list of what we happened to think of. Every server not on it
- * runs unconditionally — and on a real machine that quietly includes placing a
- * phone call, spending an advertising budget, deleting a generated character
- * and writing files to disk. A voice assistant cannot ask "are you sure", so
- * the bridge has to be the one that is sure.
- *
- * So the default is deny, softened in two ways so the demo stays usable:
- *
- *   1. READ_ONLY_MCP is an explicit allowlist of servers whose whole surface is
- *      lookups and generation — search, registries, analytics reads. Anything
- *      there runs in read-only mode.
- *   2. Everywhere else, the tool has to argue for itself: its own name must
- *      begin with a read verb. `list_devices` runs; `install_apk` does not.
- *
- * On top of both sits a veto: a name containing a plainly effectful verb needs
- * ALLOW_WRITES no matter which server it came from, which is what keeps
- * `make_outbound_call` and `download_lottie` still until you ask for them.
+ * This used to be the home directory, which made every file under it — SSH
+ * keys, the Claude login, other projects' .env files — fair game for a Read,
+ * and the CLI approves reads inside its working directory without asking
+ * anyone. A dedicated folder keeps "what can a web page talk JARVIS into
+ * reading" down to what JARVIS itself put there.
  */
-const READ_ONLY_MCP = new Set([
-  'exa', 'exa-code', 'serper', 'serpapi', 'lottie-search', 'mcp-registry',
-  'openrouter', 'openrouter-image', 'Microsoft_Clarity',
-  // The generation servers belong here too, and leaving them out was a real
-  // regression: `generate_image` begins with no read verb, so it fell to the
-  // deny branch and "generate an image of the Mark VII suit" — the headline
-  // demo — stopped working in the default mode.
-  //
-  // Putting them on the allowlist is safe because the veto below still applies
-  // to allowlisted servers: it is what continues to withhold
-  // make_outbound_call, delete_character, create_* and edit_image. Generation
-  // runs; acting on the world does not.
-  'higgsfield', 'heygen', 'elevenlabs',
-])
+const WORKSPACE = resolvePath(
+  process.env.JARVIS_WORKSPACE ?? join(homedir(), '.jarvis', 'workspace'),
+)
+mkdirSync(WORKSPACE, { recursive: true })
+
+const TOOL_ROOTS = fileRoots({
+  workspace: WORKSPACE,
+  extra: (process.env.JARVIS_FILE_ROOTS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+})
 
 /**
- * Anchored on the tool name, so it reads the verb rather than the noun.
- * `screenshot` is in here because it is a read that doesn't sound like one,
- * and the persona is told in as many words to put screenshots on the display.
+ * The enforcement point. A PreToolUse hook runs before every tool call,
+ * including the ones the CLI would otherwise approve on its own without
+ * consulting canUseTool — see policy.mjs for the measurement.
  */
-const READ_VERB =
-  /^(get|list|read|search|find|query|fetch|check|describe|inspect|show|view|explain|screenshot)/i
-
-/**
- * Unanchored on purpose — `make_outbound_call` and `Bulk-Edit-Events` both
- * hide their verb in the middle. `download` is here because it writes a file
- * even though it sounds like a read.
- */
-const EFFECTFUL_VERB =
-  /(send|call|post|create|delete|remove|update|edit|write|install|launch|tap|swipe|press|type|buy|pay|charge|publish|deploy|outbound|download)/i
-
-/**
- * Tools whose names trip the veto without deserving it.
- *
- * The veto reads verbs out of names, which is the right instinct and
- * occasionally the wrong answer. `openrouter send-message` sends a prompt to a
- * language model and gets text back — nothing in the world changes — but it is
- * indistinguishable by name from sending mail. Asking a second model a question
- * is one of the better things this assistant can do, so it is named here
- * instead of being lost to a regex.
- *
- * Full `server__tool` keys, so an exemption can never leak across servers.
- */
-const VETO_EXEMPT = new Set([
-  'openrouter__send-message',
-  'openrouter__send-feedback',
-])
-
-function decideTool(name) {
-  if (READ_ONLY_BUILTINS.has(name)) return true
-  if (WRITE_BUILTINS.has(name)) return ALLOW_WRITES
-
-  const server = mcpServerOf(name)
-  if (server) {
-    // The HUD, and the interface controls beside it. Both run in this process
-    // and draw on our own screen, so neither is something to withhold —
-    // without them JARVIS has no display at all. They also have to be named
-    // here rather than left to the verb rules below, which read `ui_theme` as
-    // a write and would hold the whole surface back behind ALLOW_WRITES.
-    if (server === 'jarvis' || server === 'jarvis_ui') return true
-
-    // The browser server gates itself, at construction: chromeServer() only
-    // builds the acting tools — click, type, form input, close tab — when
-    // ALLOW_WRITES is set, so anything that reaches here at all is something
-    // the same policy has already permitted. Deciding it a second time by
-    // reading verbs out of the name would only get it wrong: `chrome_navigate`
-    // begins with no read verb and would fall to the write branch, which would
-    // withhold the one tool the whole server is for.
-    if (server === 'jarvis_chrome') return true
-
-    // The camera. Not withheld behind ALLOW_WRITES: looking changes nothing,
-    // and the real gate is the browser's own camera permission plus an
-    // indicator the user can see for as long as it is live.
-    if (server === 'jarvis_eyes') return true
-
-    const tool = mcpToolOf(name)
-    if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
-      return ALLOW_WRITES
-    }
-    // The session tools this bridge is developed inside count as read-only too.
-    if (READ_ONLY_MCP.has(server) || server.startsWith('ccd_session')) return true
-    return READ_VERB.test(tool) ? true : ALLOW_WRITES
+const enforcePolicy = async (input) => {
+  const verdict = checkToolUse(input.tool_name, input.tool_input, {
+    allowWrites: ALLOW_WRITES,
+    cwd: WORKSPACE,
+    roots: TOOL_ROOTS,
+  })
+  let reason = verdict.allow ? null : verdict.reason
+  if (!reason && input.tool_name === 'WebFetch') {
+    const problem = await fetchTargetProblem(input.tool_input?.url)
+    if (problem) reason = `Blocked: that address cannot be fetched (${problem}).`
   }
-  return ALLOW_WRITES
+  if (!reason) return {}
+  console.log(`[jarvis] tool ${input.tool_name} -> deny (policy)`)
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  }
 }
 
 const SYSTEM_PROMPT = `You are JARVIS. You are speaking out loud to one person.
@@ -531,6 +460,7 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024
 
 const FILE_ROOTS = [
   homedir(),
+  WORKSPACE,
   // Both temp directories, because on macOS os.tmpdir() is the per-user
   // $TMPDIR under /var/folders while half the tools that take a screenshot
   // still write it to /tmp. Dropping one of them loses real panels.
@@ -1299,9 +1229,15 @@ wss.on('connection', (socket) => {
       // of input tokens on every turn. Replacing it makes the persona stick,
       // keeps answers short enough to speak, and cuts cost per turn.
       systemPrompt: SYSTEM_PROMPT,
-      // Run from the home directory so project-scoped MCP servers don't shadow
-      // the global ones, and so file tools have a sane root.
-      cwd: homedir(),
+      // Run from JARVIS's own workspace rather than the home directory. MCP
+      // discovery does not depend on it — settingSources is empty and the
+      // servers are passed in explicitly above — and file tools resolve
+      // relative paths, and get auto-approved, only inside it.
+      cwd: WORKSPACE,
+      // Only the built-ins JARVIS uses. Everything else is not merely denied
+      // but absent from the model's context. See builtinTools in policy.mjs.
+      tools: builtinTools(ALLOW_WRITES),
+      hooks: { PreToolUse: [{ hooks: [enforcePolicy] }] },
       // No filesystem settings at all. Left to its default the SDK loads
       // ~/.claude/settings.json and settings.local.json exactly as the CLI
       // does — which on a working machine means a bypassPermissions default
@@ -1335,11 +1271,11 @@ wss.on('connection', (socket) => {
       // PermissionResult object. Returning a bare boolean silently denies
       // everything, with the tool name arriving undefined.
       //
-      // Worth knowing: this is a last gate, not the only one. Calls the CLI
+      // Worth knowing: this is the second gate, not the first. Calls the CLI
       // has already settled never arrive here — its own classifier waves
-      // through a `Bash: echo hello` without asking, and only reaches us for
-      // something with a consequence, like a `touch`. So a deny here is
-      // reliable; an absence of a call here is not proof nothing ran.
+      // through a `Bash: cat file` or a Read inside the working directory
+      // without asking. The PreToolUse hook above is what sees those; this
+      // stays so that anything the CLI does ask about is still decided here.
       canUseTool: async (toolName) => {
         const ok = decideTool(toolName)
         console.log(`[jarvis] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
