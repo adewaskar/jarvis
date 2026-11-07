@@ -1,9 +1,12 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import { createConnection } from 'node:net'
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
+import { Duplex } from 'node:stream'
 
 /**
  * JARVIS's hands on your actual browser.
@@ -94,6 +97,10 @@ const CONNECT_TIMEOUT_MS = 3_000
  * accepted as a last resort, because on some setups it is all there is.
  */
 async function findSocket() {
+  return (await findUnixSocket()) ?? ((await wslPipeAvailable()) ? WSL_PIPE : null)
+}
+
+async function findUnixSocket() {
   let names
   try {
     // Windows exposes its pipes as a directory too, so the "is anything
@@ -194,7 +201,7 @@ class ChromeLink {
       )
     }
     await new Promise((resolve, reject) => {
-      const socket = createConnection(path)
+      const socket = path === WSL_PIPE ? openWslPipe() : createConnection(path)
       const timer = setTimeout(() => {
         socket.destroy()
         reject(new Error('the browser extension did not accept a connection'))
@@ -283,6 +290,118 @@ class ChromeLink {
 }
 
 const link = new ChromeLink()
+
+/** One browser call, for tests and diagnostics. */
+export const callBrowser = (name, args) => link.call(name, args)
+
+// ---------------------------------------------------------------------------
+// WSL
+//
+// Under WSL the bridge is a Linux process but Chrome, the extension and its
+// native host are Windows programs. On Windows the native host does not make a
+// Unix socket at all: it listens on a named pipe,
+// \\.\pipe\claude-mcp-browser-bridge-<Windows user>, carrying the same
+// length-prefixed frames. A Linux process cannot open a Windows pipe, but WSL
+// can run Windows programs, and every Windows install has PowerShell — so a
+// few lines of it join the pipe to its own stdin and stdout, and the bytes
+// pass through unchanged. It costs about 300 ms to start, once per
+// connection; calls after that are as fast as the socket.
+//
+// Only tried when no Unix socket exists, so a WSL setup that does have one (a
+// Linux Chrome under WSLg) is unaffected.
+// ---------------------------------------------------------------------------
+
+const ON_WSL =
+  process.platform === 'linux' &&
+  (Boolean(process.env.WSL_DISTRO_NAME) || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'))
+
+/** Stands in for a socket path when the transport is the relay. */
+const WSL_PIPE = 'wsl-named-pipe'
+
+/** The Windows user is not the Linux one, so the name is built on that side. */
+const PIPE_NAME_PS = process.env.JARVIS_CHROME_PIPE
+  ? `'${process.env.JARVIS_CHROME_PIPE.replace(/'/g, "''")}'`
+  : "('claude-mcp-browser-bridge-' + $env:USERNAME)"
+
+const RELAY_PS = `$ErrorActionPreference = 'Stop'
+$pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', ${PIPE_NAME_PS}, [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::Asynchronous)
+try { $pipe.Connect(${CONNECT_TIMEOUT_MS}) } catch { [Console]::Error.WriteLine('jarvis-relay: no pipe'); exit 2 }
+[Console]::Error.WriteLine('jarvis-relay: ready')
+$in = [Console]::OpenStandardInput()
+$out = [Console]::OpenStandardOutput()
+$up = $in.CopyToAsync($pipe)
+$down = $pipe.CopyToAsync($out)
+[void][System.Threading.Tasks.Task]::WaitAny(@($up, $down))
+$pipe.Dispose()`
+
+const PIPE_DIR = '\\\\.\\pipe\\'
+const PROBE_PS = `if ([System.IO.Directory]::GetFiles('${PIPE_DIR}') -contains ('${PIPE_DIR}' + ${PIPE_NAME_PS})) { 'yes' }`
+
+function powershell(script) {
+  return spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
+}
+
+/** Is the native host's pipe there? False off WSL, or if Windows can't be reached. */
+function wslPipeAvailable() {
+  if (!ON_WSL) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    let out = ''
+    let child
+    try {
+      child = powershell(PROBE_PS)
+    } catch {
+      return resolve(false)
+    }
+    const timer = setTimeout(() => {
+      child.kill()
+      resolve(false)
+    }, 8_000)
+    child.stdout.on('data', (d) => (out += d))
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve(false)
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      resolve(out.includes('yes'))
+    })
+    child.stdin.end()
+  })
+}
+
+/**
+ * A stream that behaves like the socket ensureConnected expects: it emits
+ * 'connect' once the relay has the pipe open, 'error' if it cannot, and
+ * 'close' when either end goes away.
+ */
+function openWslPipe() {
+  const child = powershell(RELAY_PS)
+  const stream = Duplex.from({ readable: child.stdout, writable: child.stdin })
+  let ready = false
+  let said = ''
+  child.stderr.on('data', (d) => {
+    said += d
+    if (!ready && said.includes('jarvis-relay: ready')) {
+      ready = true
+      stream.emit('connect')
+    }
+  })
+  child.on('error', (err) => stream.destroy(new Error(`could not start the Windows relay: ${err.message}`)))
+  child.on('exit', (code) => {
+    if (!ready) {
+      stream.destroy(
+        new Error(said.includes('no pipe') ? 'the browser extension is not running' : `the Windows relay exited (${code})`),
+      )
+    } else {
+      stream.destroy()
+    }
+  })
+  stream.on('close', () => child.kill())
+  return stream
+}
 
 /**
  * Turn a native-host reply into an MCP result.

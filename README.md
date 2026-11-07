@@ -297,6 +297,13 @@ window** (not an embedded preview), and you must have **allowed the microphone**
 **Bridge not reachable.** Check that `npm run bridge` is still running in its
 terminal, and that nothing else is holding port `8787`.
 
+**Running the bridge in WSL, with Chrome on Windows.** Browser control works:
+the Windows native host exposes a named pipe rather than a Unix socket, and the
+bridge reaches it through a short PowerShell relay (WSL interop must be on,
+which it is by default). Open the app at `http://127.0.0.1:5173` if
+`localhost` is slow to load — Windows tries IPv6 loopback first, and WSL does
+not forward it.
+
 ---
 
 ## Security
