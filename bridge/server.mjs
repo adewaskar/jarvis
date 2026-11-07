@@ -1317,6 +1317,12 @@ wss.on('connection', (socket) => {
       model: MODEL,
       effort: EFFORT,
       maxTurns: 24,
+      // Nothing resumes a JARVIS session — every socket starts a new one — so
+      // the transcript the SDK writes by default is only ever a record: every
+      // question, every tool result (a page JARVIS read, a mail it opened, a
+      // camera frame as base64) in ~/.claude/projects, beside your own Claude
+      // Code history and listed by `claude --resume`. Off unless asked for.
+      persistSession: process.env.JARVIS_KEEP_TRANSCRIPTS === '1',
       permissionMode: 'default',
       // Without this the SDK only emits whole assistant messages, and JARVIS
       // would sit silent until the entire answer was written. Partial events
