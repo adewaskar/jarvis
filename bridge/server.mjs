@@ -1351,7 +1351,14 @@ wss.on('connection', (socket) => {
     try {
       for await (const msg of session) {
         if (process.env.JARVIS_DEBUG === '1') {
-          console.log('[msg]', msg.type, msg.event?.type ?? '')
+          console.log(
+            '[msg]',
+            msg.type,
+            msg.event?.type ?? '',
+            msg.type === 'result' ? `subtype=${msg.subtype} result=${JSON.stringify(msg.result)}` : '',
+            msg.type === 'assistant' ? JSON.stringify(msg.message?.content ?? msg.content) : '',
+            msg.type === 'system' && msg.subtype === 'init' ? JSON.stringify(msg.mcp_servers) : '',
+          )
         }
 
         switch (msg.type) {
