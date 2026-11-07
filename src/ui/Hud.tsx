@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
+import { MIC_MODE } from '../config'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
@@ -10,7 +11,7 @@ import { GestureGuide } from './GestureGuide'
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
   boot: 'INITIALISING',
-  dormant: 'STANDBY — SAY “HEY JARVIS”',
+  dormant: MIC_MODE === 'push-to-talk' ? 'STANDBY — HOLD SPACE' : 'STANDBY — SAY “HEY JARVIS”',
   waking: 'ONLINE',
   listening: 'LISTENING',
   thinking: 'PROCESSING',
@@ -158,6 +159,7 @@ export function Hud() {
   const bootNote = useStore((s) => s.bootNote)
   const gestures = useStore((s) => s.gestures)
   const looking = useStore((s) => s.looking)
+  const mic = useStore((s) => s.mic)
   const ui = useStore((s) => s.ui)
 
   // accentFor folds JARVIS's overrides in over the phase colour, so one
@@ -312,7 +314,16 @@ export function Hud() {
 
       <footer className="hud-bottom">
         <span className="hint">
-          say <b>“hey jarvis”</b> · <kbd>Space</kbd> to talk · <kbd>G</kbd> hands
+          {MIC_MODE === 'push-to-talk' ? (
+            <>
+              hold <kbd>Space</kbd> to talk
+            </>
+          ) : (
+            <>
+              say <b>“hey jarvis”</b> · <kbd>Space</kbd> to talk · <kbd>M</kbd> mute
+            </>
+          )}{' '}
+          · <kbd>G</kbd> hands
           {voice && (
             <>
               {' · '}
@@ -336,6 +347,47 @@ export function Hud() {
         </div>
       )}
       <GestureGuide live={gestures} />
+      {phase !== 'offline' && phase !== 'boot' && <MicState mic={mic} />}
     </div>
+  )
+}
+
+const say = (what: 'down' | 'up' | 'toggle') =>
+  window.dispatchEvent(new CustomEvent('jarvis:mic', { detail: what }))
+
+/**
+ * Whether the microphone can hear the room, stated where it cannot be missed.
+ *
+ * A voice interface otherwise gives no sign of it: the reactor pulses the same
+ * whether the loop is live or not, and the browser's own indicator is a small
+ * dot in a tab strip that a full-screen HUD hides. It is also the control —
+ * hold it to talk, or click it to mute — so the state and the switch are the
+ * same thing.
+ */
+function MicState({ mic }: { mic: 'off' | 'live' | 'muted' }) {
+  const ptt = MIC_MODE === 'push-to-talk'
+  const label =
+    mic === 'live'
+      ? ptt
+        ? 'MIC LIVE'
+        : 'MIC ON · M TO MUTE'
+      : mic === 'muted'
+        ? 'MIC MUTED · M TO RESUME'
+        : ptt
+          ? 'MIC OFF · HOLD SPACE TO TALK'
+          : 'MIC OFF'
+  return (
+    <button
+      type="button"
+      className={`mic-state mic-${mic}`}
+      aria-pressed={mic === 'live'}
+      aria-label={label}
+      onPointerDown={ptt ? () => say('down') : undefined}
+      onPointerUp={ptt ? () => say('up') : undefined}
+      onPointerLeave={ptt ? () => say('up') : undefined}
+      onClick={ptt ? undefined : () => say('toggle')}
+    >
+      {label}
+    </button>
   )
 }

@@ -228,6 +228,9 @@ type State = {
   /** Set while JARVIS is taking a look, to whatever he said he was looking for.
    *  null when he is not. The camera light is on either way — this says why. */
   looking: string | null
+  /** The microphone, as the user should understand it: 'live' means what is
+   *  said near it can be captured and sent; 'muted' and 'off' mean it cannot. */
+  mic: 'off' | 'live' | 'muted'
   /** Transient status line during boot, e.g. the voice model download. */
   bootNote: string
   /** Cards currently on the display, newest last. */
@@ -244,6 +247,7 @@ type State = {
   setVoice: (v: string) => void
   setGestures: (on: boolean) => void
   setLooking: (why: string | null) => void
+  setMic: (mic: 'off' | 'live' | 'muted') => void
   setBootNote: (n: string) => void
   pushPanel: (p: Panel) => void
   clearPanels: () => void
@@ -281,6 +285,7 @@ export const useStore = create<State>((set) => ({
   voice: '',
   gestures: false,
   looking: null,
+  mic: 'off',
   panels: [],
   blades: [],
   focusedBlade: null,
@@ -291,6 +296,7 @@ export const useStore = create<State>((set) => ({
   setVoice: (voice) => set({ voice }),
   setGestures: (gestures) => set({ gestures }),
   setLooking: (looking) => set({ looking }),
+  setMic: (mic) => set({ mic }),
   setBootNote: (bootNote) => set({ bootNote }),
   // Three is as many as fits around the reactor without crowding it. Sticky
   // panels are exempt from the cull — the tool description promises they stay

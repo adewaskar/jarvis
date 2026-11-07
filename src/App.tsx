@@ -13,7 +13,7 @@ import * as hands from './lib/hands'
 import { listenForClap } from './lib/clap'
 import * as camera from './lib/camera'
 import * as kokoro from './lib/kokoro'
-import { TTS_ENGINE } from './config'
+import { MIC_MODE, TTS_ENGINE } from './config'
 import { forTool, attention } from './lib/fillers'
 import {
   ask,
@@ -29,7 +29,8 @@ import {
   usingBridge,
   type Msg,
 } from './lib/brain'
-import { startAnalyser, micLevel } from './lib/audio'
+import { startAnalyser, micLevel, releaseMic } from './lib/audio'
+import { createPtt, type Ptt } from './lib/ptt'
 import { probeCapabilities } from './lib/capabilities'
 import { env } from './config'
 
@@ -113,6 +114,14 @@ export default function App() {
 
   /** Open the mic and wait. `window` is how long before he gives up. */
   const listen = (window: number) => {
+    // In push-to-talk nothing is open between presses, so a LISTENING state
+    // would be a false claim about the microphone. Stand down instead.
+    if (MIC_MODE === 'push-to-talk') {
+      clearIdle()
+      store.getState().setCaption('')
+      store.getState().setPhase('dormant')
+      return
+    }
     clearIdle()
     const s = store.getState()
     s.setCaption('')
@@ -316,6 +325,85 @@ export default function App() {
     store.getState().setError(message)
   }
 
+  // -- microphone -----------------------------------------------------------
+
+  const startLoop = async () => {
+    voice.current = await startVoice({
+      mode,
+      onWake,
+      onSpeechStart,
+      onPartial,
+      onUtterance,
+      onError: onVoiceError,
+    })
+    store.getState().setMic(voice.current.live() ? 'live' : 'off')
+  }
+
+  /** M. Stops the loop and hands the device back, so every indicator goes out. */
+  const toggleMute = async () => {
+    const s = store.getState()
+    if (MIC_MODE !== 'always' || s.phase === 'offline' || s.phase === 'boot') return
+    if (s.mic === 'muted') {
+      try {
+        await startAnalyser()
+      } catch {
+        /* the reactor just won't pulse */
+      }
+      await startLoop()
+      return
+    }
+    voice.current?.stop()
+    voice.current = null
+    releaseMic()
+    s.setMic('muted')
+    if (s.phase === 'listening' || s.phase === 'waking') goDormant()
+  }
+
+  const ptt = useRef<Ptt | null>(null)
+
+  /** Space (or the MIC button) held down: open the microphone and capture. */
+  const pttDown = async () => {
+    const s = store.getState()
+    if (s.phase === 'offline' || s.phase === 'boot' || ptt.current) return
+    // Pressing is addressing him: stop whatever he was doing, as a barge-in.
+    if (s.phase === 'dormant') s.setPhase('listening')
+    onSpeechStart()
+    s.setError(null)
+    sfx.play('listen')
+    const p = createPtt(onPartial)
+    ptt.current = p
+    try {
+      await p.start()
+      if (ptt.current === p) store.getState().setMic('live')
+    } catch (err) {
+      ptt.current = null
+      p.cancel()
+      store.getState().setMic('off')
+      onVoiceError(
+        err instanceof DOMException && err.name === 'NotAllowedError'
+          ? 'Microphone access denied — voice input is unavailable.'
+          : String((err as Error)?.message ?? err),
+      )
+      goDormant()
+    }
+  }
+
+  /** Released: the microphone closes first, then the words go out. */
+  const pttUp = async () => {
+    const p = ptt.current
+    if (!p) return
+    ptt.current = null
+    store.getState().setMic('off')
+    let text = ''
+    try {
+      text = await p.finish()
+    } catch (err) {
+      onVoiceError(String((err as Error)?.message ?? err))
+    }
+    if (text) onUtterance(text)
+    else goDormant()
+  }
+
   // -- power on -------------------------------------------------------------
 
   const powerOn = async () => {
@@ -500,7 +588,8 @@ export default function App() {
     // failure here costs the animation and nothing else — saying "voice input
     // is unavailable" was both alarming and untrue.
     try {
-      await startAnalyser()
+      // Push-to-talk opens the microphone per press and nowhere else.
+      if (MIC_MODE === 'always') await startAnalyser()
     } catch {
       console.warn(
         '[jarvis] no microphone stream — the reactor will not pulse with your ' +
@@ -516,15 +605,9 @@ export default function App() {
     await probeCapabilities()
     store.getState().setVoice(currentVoiceName())
 
-    // One voice loop, started once, running until the page closes.
-    voice.current = await startVoice({
-      mode,
-      onWake,
-      onSpeechStart,
-      onPartial,
-      onUtterance,
-      onError: onVoiceError,
-    })
+    // One voice loop, started once, running until the page closes — or until
+    // muted. Push-to-talk has no loop at all.
+    if (MIC_MODE === 'always') await startLoop()
 
     store.getState().setPhase('dormant')
   }
@@ -544,7 +627,7 @@ export default function App() {
    * about a feature nobody asked for would be worse than quietly doing without.
    */
   useEffect(() => {
-    if (phase !== 'offline') return
+    if (phase !== 'offline' || MIC_MODE === 'push-to-talk') return
     let live: { stop: () => void } | null = null
     let gone = false
     void listenForClap(() => {
@@ -661,6 +744,13 @@ export default function App() {
         return
       }
 
+      // M mutes: the loop stops and the device is released, not merely ignored.
+      if (e.key === 'm' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        void toggleMute()
+        return
+      }
+
       // Space starts a turn without the wake word. Worth using while filming so
       // a missed wake word doesn't cost a take.
       if (e.code !== 'Space' || e.repeat) return
@@ -669,6 +759,8 @@ export default function App() {
       const phase = store.getState().phase
       if (phase === 'offline') {
         void powerOn()
+      } else if (MIC_MODE === 'push-to-talk') {
+        if (phase !== 'boot') void pttDown()
       } else if (phase === 'boot') {
         /* ignore — the boot sequence owns the phase until it finishes */
       } else if (
@@ -684,9 +776,30 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
 
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && MIC_MODE === 'push-to-talk') void pttUp()
+    }
+    window.addEventListener('keyup', onKeyUp)
+    // Letting go of the key outside the window must still close the microphone.
+    const onBlur = () => {
+      if (ptt.current) void pttUp()
+    }
+    window.addEventListener('blur', onBlur)
+    const onMicButton = (e: Event) => {
+      const what = (e as CustomEvent<'down' | 'up' | 'toggle'>).detail
+      if (what === 'down') void pttDown()
+      else if (what === 'up') void pttUp()
+      else void toggleMute()
+    }
+    window.addEventListener('jarvis:mic', onMicButton)
+
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('jarvis:mic', onMicButton)
+      ptt.current?.cancel()
       clearIdle()
       if (voicePoll.current) clearInterval(voicePoll.current)
       voice.current?.stop()

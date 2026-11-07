@@ -33,6 +33,27 @@ export async function startAnalyser(): Promise<void> {
   buf = new Uint8Array(analyser.frequencyBinCount)
 }
 
+/**
+ * Give the microphone back to the operating system.
+ *
+ * Stopping the voice loop is not enough on its own: the stream stays open, the
+ * browser's recording indicator stays on, and so does the OS one. Only stopping
+ * every track does that. The next getMic() asks for a fresh stream.
+ */
+export function releaseMic(): void {
+  stream?.getTracks().forEach((t) => t.stop())
+  stream = null
+  void ctx?.close()
+  ctx = null
+  analyser = null
+  buf = null
+}
+
+/** True while this page holds a live microphone track. */
+export function micOpen(): boolean {
+  return Boolean(stream?.getAudioTracks().some((t) => t.readyState === 'live'))
+}
+
 /** 0..1 loudness. Returns 0 before the analyser is up. */
 export function micLevel(): number {
   if (!analyser || !buf) return 0

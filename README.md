@@ -254,6 +254,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 |---|---|
 | `VITE_BACKEND` | `bridge` (default) or `direct` |
 | `VITE_BRIDGE_URL` | Where to reach the bridge |
+| `VITE_MIC_MODE` | `always` (default) or `push-to-talk` — see below |
 | `VITE_TTS_ENGINE` | `system` or `kokoro` |
 | `VITE_KOKORO_VOICE` | Voice for the Kokoro engine |
 | `VITE_USE_ELEVENLABS` | Force the ElevenLabs voice on |
@@ -313,6 +314,15 @@ Press **T** for a one-line audio self-test.
 
 **No voice at all.** You must be in **Chrome or Edge**, in a **real browser
 window** (not an embedded preview), and you must have **allowed the microphone**.
+
+**Using it where other people can be heard.** By default the microphone stays
+open after INITIALISE, and everything said near it is sent to a speech service
+to check for the wake word (ElevenLabs Scribe with a key, Google's recogniser
+through Chrome without one). Press **M** to mute — that releases the device, so
+the browser and OS indicators go out — or set `VITE_MIC_MODE=push-to-talk`:
+nothing is captured until you hold **Space** (or the MIC button), and the
+microphone closes the moment you let go. The badge at the top always says which
+state it is in.
 
 **Bridge not reachable.** Check that `npm run bridge` is still running in its
 terminal, and that nothing else is holding port `8787`. If the port is taken,

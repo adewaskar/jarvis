@@ -75,6 +75,23 @@ export const BRIDGE_WS_URL = str(import.meta.env.VITE_BRIDGE_URL) ?? 'ws://local
 export const BRIDGE_HTTP_URL = BRIDGE_WS_URL.replace(/^ws/, 'http')
 
 /**
+ * When the microphone is open.
+ *
+ *   always       — the default. After INITIALISE the microphone stays open and
+ *                  everything said near it is checked for the wake word, which
+ *                  means sent to a speech service: ElevenLabs Scribe with a key,
+ *                  Google's recogniser (Chrome's SpeechRecognition) without.
+ *                  M mutes, and actually releases the device.
+ *   push-to-talk — nothing is captured until you hold Space (or the MIC
+ *                  button); letting go closes the microphone and sends that one
+ *                  utterance. For shared rooms, where the people nearby did not
+ *                  agree to be transcribed. No clap-to-start either, since that
+ *                  would mean listening on the ignition screen.
+ */
+export const MIC_MODE: 'always' | 'push-to-talk' =
+  str(import.meta.env.VITE_MIC_MODE) === 'push-to-talk' ? 'push-to-talk' : 'always'
+
+/**
  * Speech output engine.
  *
  * false (default) — the browser's own speechSynthesis. Runs on-device, so

@@ -1898,3 +1898,52 @@ kbd {
   transform: scaleX(-1);
   background: #000;
 }
+
+/* The microphone, always stated. Top centre, under the camera indicator and
+   clear of the captions, errors and suggestions that come and go at the
+   bottom. A real button: hold to talk in push-to-talk, click to mute. */
+.mic-state {
+  position: fixed;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 96;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: #cfe9ee;
+  border: 1px solid rgba(207, 233, 238, 0.35);
+  background: rgba(2, 8, 12, 0.85);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+.mic-state::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5b6b70;
+}
+.mic-state.mic-live {
+  color: #fff;
+  border-color: #ff4d4d;
+}
+.mic-state.mic-live::before {
+  background: #ff4d4d;
+  box-shadow: 0 0 8px #ff4d4d;
+  animation: handsPulse 1.6s ease-in-out infinite;
+}
+.mic-state.mic-muted {
+  color: #ffcf66;
+  border-color: rgba(255, 207, 102, 0.6);
+}
+.mic-state:focus-visible {
+  outline: 2px solid #cfe9ee;
+  outline-offset: 2px;
+}
