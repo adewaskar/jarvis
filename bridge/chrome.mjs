@@ -56,6 +56,18 @@ import { join } from 'node:path'
 const SOCKET_DIR = `/tmp/claude-mcp-browser-bridge-${userInfo().username}`
 
 /**
+ * The same rendezvous on Windows, which has no Unix sockets in /tmp.
+ *
+ * The native host listens on a named pipe instead, and the name carries no pid:
+ * there is exactly one candidate, so nothing to sort and no stale file to step
+ * around. Everything above this — the length-prefixed frames, the connection
+ * handling — is unchanged, because net.createConnection dials a pipe by path
+ * exactly as it dials a socket.
+ */
+const PIPE_NAME = `claude-mcp-browser-bridge-${userInfo().username}`
+const PIPE_PATH = `\\\\.\\pipe\\${PIPE_NAME}`
+
+/**
  * How long a single browser action may take.
  *
  * Generous because these are real page loads on a real network, and the failure
@@ -84,6 +96,13 @@ const CONNECT_TIMEOUT_MS = 3_000
 async function findSocket() {
   let names
   try {
+    // Windows exposes its pipes as a directory too, so the "is anything
+    // listening?" question stays one readdir — and the boot log keeps telling
+    // the truth instead of promising a browser that is not there.
+    if (process.platform === 'win32') {
+      const pipes = await readdir('\\\\.\\pipe\\')
+      return pipes.includes(PIPE_NAME) ? PIPE_PATH : null
+    }
     names = await readdir(SOCKET_DIR)
   } catch {
     return null
