@@ -43,7 +43,7 @@ import * as camera from '../lib/camera'
  * changed in each place deliberately.
  */
 const DISK_PATH =
-  /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
+  /^(?:[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\/)/
 
 /** Route a source through the bridge, which is the only origin that can
  *  actually fetch it — and the only one the page CSP will load from. */

@@ -19,7 +19,7 @@ import { BRIDGE_HTTP_URL } from '../config'
  * assets; `/Users/you/shot.png` is a screenshot JARVIS just took.
  */
 const DISK_PATH =
-  /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
+  /^(?:[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\/)/
 
 /**
  * Every media URL is rewritten to point at the bridge. Two destinations, for

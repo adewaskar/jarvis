@@ -31,7 +31,7 @@ import { BRIDGE_HTTP_URL } from '../config'
  * deliberately anyway.
  */
 const DISK_PATH =
-  /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
+  /^(?:[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\/)/
 
 /**
  * A page served over http cannot load `file:///…`, and everything interesting
