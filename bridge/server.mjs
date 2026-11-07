@@ -31,6 +31,24 @@ import { probeUrl, renderPage } from './page.mjs'
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
 
 /**
+ * Which interface to listen on. Loopback, unless you say otherwise.
+ *
+ * `server.listen(PORT)` with no host binds every interface, which puts the
+ * agent socket, the file endpoint and both proxies on the local network. The
+ * Origin check below does not save that: it keeps other *browser tabs* out, but
+ * any other machine on the LAN is free to send whatever Origin header it likes.
+ * On WSL2 with mirrored networking, and on any machine that forwards ports, a
+ * wildcard bind is reachable from the office or café network directly.
+ *
+ * 127.0.0.1 rather than 'localhost' because the name can resolve to ::1 alone,
+ * and IPv6 loopback is not forwarded between Windows and WSL — a browser on the
+ * Windows side would then find nothing listening.
+ */
+// Blank counts as unset: listen(PORT, '') binds every interface, which is the
+// one outcome this default exists to prevent.
+const HOST = process.env.JARVIS_BRIDGE_HOST?.trim() || '127.0.0.1'
+
+/**
  * A crash here takes the whole assistant down mid-sentence, and most of what
  * can reject is out of our hands — a socket dying under a write, an upstream
  * fetch aborting. Log it and keep serving; the turn that failed will surface
@@ -86,6 +104,38 @@ function originAllowed(origin) {
   if (url.protocol !== 'http:') return false
   if (!LOCAL_HOSTS.has(url.hostname)) return false
   return isDevPort(Number(url.port))
+}
+
+/**
+ * Which Host header a request must carry.
+ *
+ * The Origin check has one gap, and it is DNS rebinding. A page on
+ * attacker.example can re-point its own name at 127.0.0.1 and then fetch
+ * `http://attacker.example:8787/file?...` — a same-origin GET, which carries no
+ * Origin header at all and so sails through the `!origin` branch above. What
+ * it cannot forge is the Host header: the browser sends the name it thinks it
+ * is talking to. So anything addressed to a name other than loopback is
+ * refused before it is routed.
+ *
+ * JARVIS_ALLOWED_HOSTS names extra hostnames, for anyone who deliberately
+ * serves the bridge under another name.
+ */
+const EXTRA_HOSTS = new Set(
+  (process.env.JARVIS_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+)
+
+function hostAllowed(host) {
+  if (typeof host !== 'string' || !host) return false
+  let name
+  try {
+    name = new URL(`http://${host}`).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return LOCAL_HOSTS.has(name) || EXTRA_HOSTS.has(name)
 }
 
 /**
@@ -663,6 +713,11 @@ function corsFor(req) {
 const http = await import('node:http')
 
 const handleRequest = async (req, res) => {
+  if (!hostAllowed(req.headers.host)) {
+    console.warn(`[jarvis] refused http request for host ${req.headers.host ?? '(none)'}`)
+    res.writeHead(403)
+    return res.end('forbidden')
+  }
   const origin = req.headers.origin
   if (origin && !originAllowed(origin)) {
     console.warn(`[jarvis] refused http request from origin ${origin}`)
@@ -988,6 +1043,10 @@ const wss = new WebSocketServer({
       console.warn(`[jarvis] rejected websocket on path ${path}`)
       return done(false, 403, 'Forbidden')
     }
+    if (!hostAllowed(req.headers.host)) {
+      console.warn(`[jarvis] rejected websocket for host ${req.headers.host ?? '(none)'}`)
+      return done(false, 403, 'Forbidden')
+    }
     if (!originAllowed(origin)) {
       console.warn(
         `[jarvis] rejected websocket from origin ${origin ?? '(none)'}` +
@@ -998,9 +1057,29 @@ const wss = new WebSocketServer({
     done(true)
   },
 })
-server.listen(PORT)
+// A port someone else holds is the commonest reason the bridge won't start, and
+// Node's default is an unhandled 'error' event and a stack trace. Say it plainly
+// and exit non-zero, so a launcher knows the brain never came up.
+server.on('error', (err) => {
+  console.error(
+    err.code === 'EADDRINUSE'
+      ? `[jarvis] port ${PORT} on ${HOST} is already in use — stop whatever holds it or set JARVIS_BRIDGE_PORT`
+      : `[jarvis] bridge could not listen on ${HOST}:${PORT}: ${err.message}`,
+  )
+  process.exit(1)
+})
+await new Promise((resolve) => server.listen(PORT, HOST, resolve))
 
-console.log(`[jarvis] bridge listening on ws://localhost:${PORT}`)
+const LOOPBACK = HOST === '127.0.0.1' || HOST === '::1' || HOST === 'localhost'
+const bound = server.address()
+console.log(
+  `[jarvis] bridge listening on ws://${bound.family === 'IPv6' ? `[${bound.address}]` : bound.address}:${bound.port}`,
+)
+if (!LOOPBACK) {
+  console.warn(
+    `[jarvis] WARNING: listening on ${HOST}, not loopback — other machines on this network can reach the bridge`,
+  )
+}
 console.log(
   `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
 )
