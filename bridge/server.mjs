@@ -159,6 +159,21 @@ const ALLOW_WRITES =
   process.env.JARVIS_ALLOW_WRITES === '1' || process.argv.includes('--writes')
 
 /**
+ * Built-in capabilities to leave out entirely: `browser` (the user's own
+ * Chrome), `camera`, `interface` (the ui_* tools). A capability left out is
+ * not merely denied — its tools never reach the model, which also saves their
+ * schemas on every turn (about 3,100, 1,400 and 4,800 input tokens
+ * respectively). The display itself is always on; it is how JARVIS shows
+ * anything.
+ */
+const DISABLED = new Set(
+  (process.env.JARVIS_DISABLE ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+)
+
+/**
  * The orchestrator model. Override with JARVIS_MODEL to trade quality for pace
  * — claude-sonnet-5 is noticeably snappier on camera if Opus feels slow.
  */
@@ -307,7 +322,13 @@ const enforcePolicy = async (input) => {
   }
 }
 
-const SYSTEM_PROMPT = `You are JARVIS. You are speaking out loud to one person.
+/**
+ * The persona, in sections, so a capability that is switched off
+ * (JARVIS_DISABLE) takes its instructions with it. Telling the model to reach
+ * for chrome_* tools first when there are none costs a failed turn, and every
+ * section is input tokens on every turn.
+ */
+const PROMPT_CORE = `You are JARVIS. You are speaking out loud to one person.
 
 LENGTH. Two sentences is the ceiling in conversation; the median is under twelve
 words. Every word is read aloud and the user waits in silence while it plays, so
@@ -364,7 +385,8 @@ Plain spoken prose only. No markdown, no bullet points, no headings, no emoji,
 no asterisks, no lists. Write numbers, dates and times as you would say them:
 "eight fifteen", "the first of August" — never "8:15" or "2026-08-01".
 
-The blades — the ONLY surface:
+`
+const PROMPT_BLADES = `The blades — the ONLY surface:
 - Everything you show goes on a blade. There is nowhere else. \`blade\` opens
   one; \`display\` composes your own markup into one.
 - Anything visual the user asked for goes here: an image, an article to read, a
@@ -386,7 +408,8 @@ The blades — the ONLY surface:
   meaning — a dashboard, a chart, a profile, a table.
 - Never read a blade aloud. Say what it means and let them look.
 
-The interface itself:
+`
+const PROMPT_INTERFACE = `The interface itself:
 - The interface is yours as well. \`ui_theme\` retints it, \`ui_reactor\` reshapes
   the core, \`ui_orbit\` hangs your own images around it, \`ui_chrome\` hides the
   furniture, \`ui_effect\` fires one flourish, \`ui_screen\` clears it down,
@@ -400,7 +423,8 @@ The interface itself:
 - Put it back. A colour that outlives the moment that earned it is a fault.
 - Never mention that you have done any of it. They are looking at the screen.
 
-Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
+`
+const PROMPT_BROWSER = `Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
 browser or a web page:
 - The \`chrome_*\` tools drive the user's own Chrome. It is already signed in to
   everything they use, it carries their real cookies, and it does not read as
@@ -425,7 +449,8 @@ browser or a web page:
   you are about to do. After it, say what happened.
 - If the browser is unreachable, say so once and carry on without it.
 
-Your eyes:
+`
+const PROMPT_EYES = `Your eyes:
 - \`look\` takes one frame and lets you see it. \`watch\` takes several seconds and
   returns them as a grid of stamped frames, so you can read movement rather than
   a moment.
@@ -443,7 +468,8 @@ Your eyes:
 - Describe a watch as a sequence — what changed between the frames — not as a
   list of pictures. They know what their own hands look like.
 
-Using tools:
+`
+const PROMPT_TOOLS = `Using tools:
 - You have real tools on this machine. Use them rather than guessing.
 - Never narrate that you're about to use one. No "Let me search for that" or
   "I'll check that now" — go silent, use it, then answer. The user sees a
@@ -454,6 +480,15 @@ Using tools:
   Put the source in the panel as a short tag like "REUTERS" instead.
 - If a tool fails or isn't connected, one plain sentence saying so.
 - If you don't know, say you don't know.`
+
+const SYSTEM_PROMPT = [
+  PROMPT_CORE,
+  PROMPT_BLADES,
+  DISABLED.has('interface') ? '' : PROMPT_INTERFACE,
+  DISABLED.has('browser') ? '' : PROMPT_BROWSER,
+  DISABLED.has('camera') ? '' : PROMPT_EYES,
+  PROMPT_TOOLS,
+].join('')
 
 /**
  * ElevenLabs credentials, borrowed from the MCP server config.
@@ -1064,7 +1099,8 @@ console.log(
 // at all because an extension that is simply not running is indistinguishable
 // at the tool boundary from one that is broken, and this is the one place the
 // difference can be stated before anybody asks a question that depends on it.
-void chromeAvailable().then((ok) => {
+if (DISABLED.size) console.log(`[jarvis] disabled: ${[...DISABLED].join(', ')}`)
+if (!DISABLED.has('browser')) void chromeAvailable().then((ok) => {
   console.log(
     ok
       ? `[jarvis] browser control ready${ALLOW_WRITES ? '' : ' (reading only — clicking and typing need JARVIS_ALLOW_WRITES=1)'}`
@@ -1265,18 +1301,23 @@ wss.on('connection', (socket) => {
         jarvis: displayServer(
           (panel) => send({ type: 'panel', panel }),
           (blade) => send({ type: 'blade', blade }),
+          { camera: !DISABLED.has('camera') },
         ),
         // The interface controls, on the same socket. A separate key because
         // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
         // one server; the underscore in it is why decideTool and announceTool
         // both name `jarvis_ui` explicitly.
-        jarvis_ui: uiServer((op, args) => send({ type: 'ui', op, args })),
+        ...(DISABLED.has('interface')
+          ? {}
+          : { jarvis_ui: uiServer((op, args) => send({ type: 'ui', op, args })) }),
         // The user's own Chrome, over the extension's native-host socket. It
         // holds no per-connection state, but it is built here with the rest so
         // the write gate is read once, at the same point as everything else.
-        jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
+        ...(DISABLED.has('browser')
+          ? {}
+          : { jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) }),
         // The camera, which unlike everything else here has to ask and wait.
-        jarvis_eyes: visionServer(ask),
+        ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(ask) }),
       },
       // A plain system prompt, not the claude_code preset. The preset is
       // tuned for a coding agent — verbose, file-oriented, and a large chunk
