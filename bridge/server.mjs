@@ -1203,6 +1203,18 @@ wss.on('connection', (socket) => {
   let settling = Promise.resolve()
   let finishTurn = null
 
+  /**
+   * Which question a deliberate interrupt is cancelling.
+   *
+   * The SDK has no 'cancelled' result subtype — an interrupted turn comes back
+   * as error_during_execution, identical at the result to a turn that genuinely
+   * broke. Recording what was cancelled tells the two apart, so a barge-in
+   * stops announcing a failure that did not happen. Held as the id rather than
+   * a bare flag because an interrupt that arrives with no turn in flight would
+   * otherwise leave the flag standing and swallow the next real failure.
+   */
+  let cancelledAsk = null
+
   const turnFinished = () =>
     new Promise((resolve) => {
       finishTurn = resolve
@@ -1403,6 +1415,13 @@ wss.on('connection', (socket) => {
                 text: msg.result ?? '',
                 costUsd: msg.total_cost_usd ?? null,
               })
+            } else if (cancelledAsk !== null && cancelledAsk === answering) {
+              // Cancelled on purpose. The client bumps its turn counter before
+              // interrupting, so it is already discarding anything tagged with
+              // this id — sending an error would be a message nobody reads,
+              // and logging one puts a failure in the log for a feature that
+              // worked.
+              console.log('[jarvis] turn interrupted')
             } else {
               console.error(
                 `[jarvis] turn failed: ${msg.subtype}`,
@@ -1413,6 +1432,7 @@ wss.on('connection', (socket) => {
                 message: RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default,
               })
             }
+            cancelledAsk = null
             // Whatever was waiting on this turn to finish can go now. This is
             // the only place a turn is genuinely over.
             finishTurn?.()
@@ -1496,6 +1516,9 @@ wss.on('connection', (socket) => {
     }
 
     if (msg.type === 'interrupt') {
+      // Marks the turn in flight as cancelled on purpose, so the failed result
+      // it is about to produce is not reported as a fault.
+      cancelledAsk = answering
       // Held so the next question can wait for it rather than racing it.
       const stopped = turnFinished()
       settling = Promise.resolve(session.interrupt?.())
