@@ -175,9 +175,11 @@ body::after {
 
 .meter-fill {
   width: 100%;
+  height: 100%;
   background: var(--accent);
   box-shadow: 0 0 12px var(--accent);
-  transition: height 90ms linear;
+  transform-origin: bottom;
+  transition: transform 90ms linear;
 }
 
 /* Tool badge */
