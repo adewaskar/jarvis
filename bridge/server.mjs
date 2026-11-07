@@ -1323,6 +1323,12 @@ wss.on('connection', (socket) => {
       // camera frame as base64) in ~/.claude/projects, beside your own Claude
       // Code history and listed by `claude --resume`. Off unless asked for.
       persistSession: process.env.JARVIS_KEEP_TRANSCRIPTS === '1',
+      // Run the agent through something else — typically a sandbox wrapper
+      // (bubblewrap, firejail, sandbox-exec) that execs the real CLI with the
+      // arguments it was given. The SDK's bundled CLI is used when unset.
+      ...(process.env.JARVIS_CLAUDE_EXECUTABLE
+        ? { pathToClaudeCodeExecutable: process.env.JARVIS_CLAUDE_EXECUTABLE }
+        : {}),
       permissionMode: 'default',
       // Without this the SDK only emits whole assistant messages, and JARVIS
       // would sit silent until the entire answer was written. Partial events
