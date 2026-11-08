@@ -22,11 +22,18 @@ import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { homedir, tmpdir } from 'node:os'
-import { readFileSync, realpathSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { probeUrl, renderPage } from './page.mjs'
+import {
+  builtinTools,
+  checkToolUse,
+  decideTool as decidePolicy,
+  fetchTargetProblem,
+  fileRoots,
+} from './policy.mjs'
 
 /**
  * Server-side secrets from .env.local.
@@ -54,6 +61,24 @@ try {
 }
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
+
+/**
+ * Which interface to listen on. Loopback, unless you say otherwise.
+ *
+ * `server.listen(PORT)` with no host binds every interface, which puts the
+ * agent socket, the file endpoint and both proxies on the local network. The
+ * Origin check below does not save that: it keeps other *browser tabs* out, but
+ * any other machine on the LAN is free to send whatever Origin header it likes.
+ * On WSL2 with mirrored networking, and on any machine that forwards ports, a
+ * wildcard bind is reachable from the office or café network directly.
+ *
+ * 127.0.0.1 rather than 'localhost' because the name can resolve to ::1 alone,
+ * and IPv6 loopback is not forwarded between Windows and WSL — a browser on the
+ * Windows side would then find nothing listening.
+ */
+// Blank counts as unset: listen(PORT, '') binds every interface, which is the
+// one outcome this default exists to prevent.
+const HOST = process.env.JARVIS_BRIDGE_HOST?.trim() || '127.0.0.1'
 
 /**
  * A crash here takes the whole assistant down mid-sentence, and most of what
@@ -114,14 +139,64 @@ function originAllowed(origin) {
 }
 
 /**
+ * Which Host header a request must carry.
+ *
+ * The Origin check has one gap, and it is DNS rebinding. A page on
+ * attacker.example can re-point its own name at 127.0.0.1 and then fetch
+ * `http://attacker.example:8787/file?...` — a same-origin GET, which carries no
+ * Origin header at all and so sails through the `!origin` branch above. What
+ * it cannot forge is the Host header: the browser sends the name it thinks it
+ * is talking to. So anything addressed to a name other than loopback is
+ * refused before it is routed.
+ *
+ * JARVIS_ALLOWED_HOSTS names extra hostnames, for anyone who deliberately
+ * serves the bridge under another name.
+ */
+const EXTRA_HOSTS = new Set(
+  (process.env.JARVIS_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+)
+
+function hostAllowed(host) {
+  if (typeof host !== 'string' || !host) return false
+  let name
+  try {
+    name = new URL(`http://${host}`).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return LOCAL_HOSTS.has(name) || EXTRA_HOSTS.has(name)
+}
+
+/**
  * Voice is a bad interface for a confirmation dialog: there is no window to
  * click and the model can't pause for one. So the bridge decides.
  *
  * Read-only and generative tools run freely. Anything that writes to disk,
- * runs a shell, or changes the world waits for JARVIS_ALLOW_WRITES=1. Start
+ * runs a shell, or changes the world waits for JARVIS_ALLOW_WRITES=1 (or the
+ * --writes flag, which `npm run bridge:writes` passes — a flag works in every
+ * shell, where an inline env assignment does not run on Windows). Start
  * without it, and turn it on once you trust what you're demoing.
  */
-const ALLOW_WRITES = process.env.JARVIS_ALLOW_WRITES === '1'
+const ALLOW_WRITES =
+  process.env.JARVIS_ALLOW_WRITES === '1' || process.argv.includes('--writes')
+
+/**
+ * Built-in capabilities to leave out entirely: `browser` (the user's own
+ * Chrome), `camera`, `interface` (the ui_* tools). A capability left out is
+ * not merely denied — its tools never reach the model, which also saves their
+ * schemas on every turn (about 3,100, 1,400 and 4,800 input tokens
+ * respectively). The display itself is always on; it is how JARVIS shows
+ * anything.
+ */
+const DISABLED = new Set(
+  (process.env.JARVIS_DISABLE ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+)
 
 /**
  * The orchestrator model. Override with JARVIS_MODEL to trade quality for pace
@@ -147,26 +222,6 @@ const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5'
 const EFFORT = process.env.JARVIS_EFFORT ?? 'high'
 
 /**
- * Both spellings of every renamed built-in are listed on purpose. The SDK
- * presents several tools to the model under newer names — Task is Agent,
- * BashOutput is TaskOutput, KillShell is TaskStop, and the MCP resource tools
- * gained a "Tool" suffix — so a set holding only the old names never matches
- * and the tool falls through to the write branch, which is the opposite of
- * what these lists mean. Keep both until the old names are certainly gone.
- */
-const READ_ONLY_BUILTINS = new Set([
-  'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite',
-  'Task', 'Agent', 'ToolSearch',
-  'ListMcpResources', 'ListMcpResourcesTool',
-  'ReadMcpResource', 'ReadMcpResourceTool',
-  'BashOutput', 'TaskOutput',
-])
-const WRITE_BUILTINS = new Set([
-  'Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
-  'KillShell', 'TaskStop',
-])
-
-/**
  * Every MCP server Claude Code has configured, read out of its own config.
  *
  * This does two jobs. The HUD wants the names while the boot animation plays,
@@ -177,8 +232,9 @@ const WRITE_BUILTINS = new Set([
  * own, so handing them over explicitly is what keeps the local stdio ones —
  * the whole reason the bridge exists — in play.
  *
- * Only the global block and the home-directory project scope, because
- * homedir() is our cwd. That makes the list a close but not exact match for
+ * Only the global block and the home-directory project scope — the scope
+ * `claude` itself applies when run from home, which is where these servers
+ * have always been picked up from. That makes the list a close but not exact match for
  * the agent's own: the 'ready' sent on connect comes from here and the second
  * one, sent from the init message a turn later, carries live status. Expect
  * the two to differ, and treat the later one as authoritative.
@@ -198,124 +254,106 @@ function configuredServers() {
   }
 }
 
-const MCP_SERVERS = configuredServers()
-
-/** MCP tools arrive as `mcp__<server>__<tool>`. */
-const mcpServerOf = (toolName) =>
-  toolName.startsWith('mcp__') ? toolName.split('__')[1] : null
-
-/** The tool half, which can itself contain underscores: `mcp__x__a__b` -> `a__b`. */
-const mcpToolOf = (toolName) => toolName.split('__').slice(2).join('__')
-
 /**
- * MCP policy, and why it is shaped this way.
+ * Which of those JARVIS actually gets.
  *
- * A short list of "servers that can change things" is the wrong default,
- * because it is a list of what we happened to think of. Every server not on it
- * runs unconditionally — and on a real machine that quietly includes placing a
- * phone call, spending an advertising budget, deleting a generated character
- * and writing files to disk. A voice assistant cannot ask "are you sure", so
- * the bridge has to be the one that is sure.
- *
- * So the default is deny, softened in two ways so the demo stays usable:
- *
- *   1. READ_ONLY_MCP is an explicit allowlist of servers whose whole surface is
- *      lookups and generation — search, registries, analytics reads. Anything
- *      there runs in read-only mode.
- *   2. Everywhere else, the tool has to argue for itself: its own name must
- *      begin with a read verb. `list_devices` runs; `install_apk` does not.
- *
- * On top of both sits a veto: a name containing a plainly effectful verb needs
- * ALLOW_WRITES no matter which server it came from, which is what keeps
- * `make_outbound_call` and `download_lottie` still until you ask for them.
+ * Every server in your Claude Code config is a server a voice agent that reads
+ * the open web can be talked into calling, so "all of them" is a poor default
+ * for anyone whose config has grown. JARVIS_MCP_SERVERS names the ones to hand
+ * over, comma separated; unset keeps the old behaviour of passing everything
+ * configured, and an empty value passes none.
  */
-const READ_ONLY_MCP = new Set([
-  'exa', 'exa-code', 'serper', 'serpapi', 'lottie-search', 'mcp-registry',
-  'openrouter', 'openrouter-image', 'Microsoft_Clarity',
-  // The generation servers belong here too, and leaving them out was a real
-  // regression: `generate_image` begins with no read verb, so it fell to the
-  // deny branch and "generate an image of the Mark VII suit" — the headline
-  // demo — stopped working in the default mode.
-  //
-  // Putting them on the allowlist is safe because the veto below still applies
-  // to allowlisted servers: it is what continues to withhold
-  // make_outbound_call, delete_character, create_* and edit_image. Generation
-  // runs; acting on the world does not.
-  'higgsfield', 'heygen', 'elevenlabs',
-])
-
-/**
- * Anchored on the tool name, so it reads the verb rather than the noun.
- * `screenshot` is in here because it is a read that doesn't sound like one,
- * and the persona is told in as many words to put screenshots on the display.
- */
-const READ_VERB =
-  /^(get|list|read|search|find|query|fetch|check|describe|inspect|show|view|explain|screenshot)/i
-
-/**
- * Unanchored on purpose — `make_outbound_call` and `Bulk-Edit-Events` both
- * hide their verb in the middle. `download` is here because it writes a file
- * even though it sounds like a read.
- */
-const EFFECTFUL_VERB =
-  /(send|call|post|create|delete|remove|update|edit|write|install|launch|tap|swipe|press|type|buy|pay|charge|publish|deploy|outbound|download)/i
-
-/**
- * Tools whose names trip the veto without deserving it.
- *
- * The veto reads verbs out of names, which is the right instinct and
- * occasionally the wrong answer. `openrouter send-message` sends a prompt to a
- * language model and gets text back — nothing in the world changes — but it is
- * indistinguishable by name from sending mail. Asking a second model a question
- * is one of the better things this assistant can do, so it is named here
- * instead of being lost to a regex.
- *
- * Full `server__tool` keys, so an exemption can never leak across servers.
- */
-const VETO_EXEMPT = new Set([
-  'openrouter__send-message',
-  'openrouter__send-feedback',
-])
-
-function decideTool(name) {
-  if (READ_ONLY_BUILTINS.has(name)) return true
-  if (WRITE_BUILTINS.has(name)) return ALLOW_WRITES
-
-  const server = mcpServerOf(name)
-  if (server) {
-    // The HUD, and the interface controls beside it. Both run in this process
-    // and draw on our own screen, so neither is something to withhold —
-    // without them JARVIS has no display at all. They also have to be named
-    // here rather than left to the verb rules below, which read `ui_theme` as
-    // a write and would hold the whole surface back behind ALLOW_WRITES.
-    if (server === 'jarvis' || server === 'jarvis_ui') return true
-
-    // The browser server gates itself, at construction: chromeServer() only
-    // builds the acting tools — click, type, form input, close tab — when
-    // ALLOW_WRITES is set, so anything that reaches here at all is something
-    // the same policy has already permitted. Deciding it a second time by
-    // reading verbs out of the name would only get it wrong: `chrome_navigate`
-    // begins with no read verb and would fall to the write branch, which would
-    // withhold the one tool the whole server is for.
-    if (server === 'jarvis_chrome') return true
-
-    // The camera. Not withheld behind ALLOW_WRITES: looking changes nothing,
-    // and the real gate is the browser's own camera permission plus an
-    // indicator the user can see for as long as it is live.
-    if (server === 'jarvis_eyes') return true
-
-    const tool = mcpToolOf(name)
-    if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
-      return ALLOW_WRITES
-    }
-    // The session tools this bridge is developed inside count as read-only too.
-    if (READ_ONLY_MCP.has(server) || server.startsWith('ccd_session')) return true
-    return READ_VERB.test(tool) ? true : ALLOW_WRITES
-  }
-  return ALLOW_WRITES
+function allowedServers(all, list) {
+  if (list === undefined) return all
+  const wanted = new Set(
+    list
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  )
+  return Object.fromEntries(Object.entries(all).filter(([name]) => wanted.has(name)))
 }
 
-const SYSTEM_PROMPT = `You are JARVIS. You are speaking out loud to one person.
+const MCP_SERVERS = allowedServers(configuredServers(), process.env.JARVIS_MCP_SERVERS)
+
+/**
+ * Account connectors — the mail, drive, calendar and other integrations
+ * attached to your claude.ai account — are not in ~/.claude.json and are not
+ * affected by settingSources. The CLI fetches them itself and they join the
+ * session from the second turn on, which is why the HUD's server count jumps
+ * after the first question. Measured on SDK 0.3.220: mail, drive, calendar
+ * and other account connectors all arrived that way, with their read tools
+ * running in read-only mode and their send, share and delete tools one
+ * JARVIS_ALLOW_WRITES away.
+ *
+ * strictMcpConfig limits the session to the servers passed below. Set
+ * JARVIS_ACCOUNT_CONNECTORS=1 to let the account's connectors in as well.
+ */
+const ACCOUNT_CONNECTORS = process.env.JARVIS_ACCOUNT_CONNECTORS === '1'
+
+/**
+ * The tool policy lives in policy.mjs so it can be tested on its own. Bound to
+ * this process's write setting once, so everything below reads as before.
+ */
+const decideTool = (name) => decidePolicy(name, ALLOW_WRITES)
+
+/**
+ * The agent's working directory, and the only folder its file tools may use
+ * besides the temp directory and JARVIS_FILE_ROOTS.
+ *
+ * This used to be the home directory, which made every file under it — SSH
+ * keys, the Claude login, other projects' .env files — fair game for a Read,
+ * and the CLI approves reads inside its working directory without asking
+ * anyone. A dedicated folder keeps "what can a web page talk JARVIS into
+ * reading" down to what JARVIS itself put there.
+ */
+const WORKSPACE = resolvePath(
+  process.env.JARVIS_WORKSPACE ?? join(homedir(), '.jarvis', 'workspace'),
+)
+mkdirSync(WORKSPACE, { recursive: true })
+
+const TOOL_ROOTS = fileRoots({
+  workspace: WORKSPACE,
+  extra: (process.env.JARVIS_FILE_ROOTS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+})
+
+/**
+ * The enforcement point. A PreToolUse hook runs before every tool call,
+ * including the ones the CLI would otherwise approve on its own without
+ * consulting canUseTool — see policy.mjs for the measurement.
+ */
+const enforcePolicy = async (input) => {
+  const verdict = checkToolUse(input.tool_name, input.tool_input, {
+    allowWrites: ALLOW_WRITES,
+    cwd: WORKSPACE,
+    roots: TOOL_ROOTS,
+  })
+  let reason = verdict.allow ? null : verdict.reason
+  if (!reason && input.tool_name === 'WebFetch') {
+    const problem = await fetchTargetProblem(input.tool_input?.url)
+    if (problem) reason = `Blocked: that address cannot be fetched (${problem}).`
+  }
+  if (!reason) return {}
+  console.log(`[jarvis] tool ${input.tool_name} -> deny (policy)`)
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  }
+}
+
+/**
+ * The persona, in sections, so a capability that is switched off
+ * (JARVIS_DISABLE) takes its instructions with it. Telling the model to reach
+ * for chrome_* tools first when there are none costs a failed turn, and every
+ * section is input tokens on every turn.
+ */
+const PROMPT_CORE = `You are JARVIS. You are speaking out loud to one person.
 
 LENGTH. Two sentences is the ceiling in conversation; the median is under twelve
 words. Every word is read aloud and the user waits in silence while it plays, so
@@ -372,7 +410,8 @@ Plain spoken prose only. No markdown, no bullet points, no headings, no emoji,
 no asterisks, no lists. Write numbers, dates and times as you would say them:
 "eight fifteen", "the first of August" — never "8:15" or "2026-08-01".
 
-The blades — the ONLY surface:
+`
+const PROMPT_BLADES = `The blades — the ONLY surface:
 - Everything you show goes on a blade. There is nowhere else. \`blade\` opens
   one; \`display\` composes your own markup into one.
 - Anything visual the user asked for goes here: an image, an article to read, a
@@ -394,7 +433,8 @@ The blades — the ONLY surface:
   meaning — a dashboard, a chart, a profile, a table.
 - Never read a blade aloud. Say what it means and let them look.
 
-The interface itself:
+`
+const PROMPT_INTERFACE = `The interface itself:
 - The interface is yours as well. \`ui_theme\` retints it, \`ui_reactor\` reshapes
   the core, \`ui_orbit\` hangs your own images around it, \`ui_chrome\` hides the
   furniture, \`ui_effect\` fires one flourish, \`ui_screen\` clears it down,
@@ -408,7 +448,8 @@ The interface itself:
 - Put it back. A colour that outlives the moment that earned it is a fault.
 - Never mention that you have done any of it. They are looking at the screen.
 
-Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
+`
+const PROMPT_BROWSER = `Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
 browser or a web page:
 - The \`chrome_*\` tools drive the user's own Chrome. It is already signed in to
   everything they use, it carries their real cookies, and it does not read as
@@ -433,7 +474,8 @@ browser or a web page:
   you are about to do. After it, say what happened.
 - If the browser is unreachable, say so once and carry on without it.
 
-Your eyes:
+`
+const PROMPT_EYES = `Your eyes:
 - \`look\` takes one frame and lets you see it. \`watch\` takes several seconds and
   returns them as a grid of stamped frames, so you can read movement rather than
   a moment.
@@ -451,7 +493,8 @@ Your eyes:
 - Describe a watch as a sequence — what changed between the frames — not as a
   list of pictures. They know what their own hands look like.
 
-Using tools:
+`
+const PROMPT_TOOLS = `Using tools:
 - You have real tools on this machine. Use them rather than guessing.
 - Never narrate that you're about to use one. No "Let me search for that" or
   "I'll check that now" — go silent, use it, then answer. The user sees a
@@ -462,6 +505,15 @@ Using tools:
   Put the source in the panel as a short tag like "REUTERS" instead.
 - If a tool fails or isn't connected, one plain sentence saying so.
 - If you don't know, say you don't know.`
+
+const SYSTEM_PROMPT = [
+  PROMPT_CORE,
+  PROMPT_BLADES,
+  DISABLED.has('interface') ? '' : PROMPT_INTERFACE,
+  DISABLED.has('browser') ? '' : PROMPT_BROWSER,
+  DISABLED.has('camera') ? '' : PROMPT_EYES,
+  PROMPT_TOOLS,
+].join('')
 
 /**
  * ElevenLabs credentials, borrowed from the MCP server config.
@@ -578,6 +630,7 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024
 
 const FILE_ROOTS = [
   homedir(),
+  WORKSPACE,
   // Both temp directories, because on macOS os.tmpdir() is the per-user
   // $TMPDIR under /var/folders while half the tools that take a screenshot
   // still write it to /tmp. Dropping one of them loses real panels.
@@ -760,6 +813,11 @@ function corsFor(req) {
 const http = await import('node:http')
 
 const handleRequest = async (req, res) => {
+  if (!hostAllowed(req.headers.host)) {
+    console.warn(`[jarvis] refused http request for host ${req.headers.host ?? '(none)'}`)
+    res.writeHead(403)
+    return res.end('forbidden')
+  }
   const origin = req.headers.origin
   if (origin && !originAllowed(origin)) {
     console.warn(`[jarvis] refused http request from origin ${origin}`)
@@ -1075,6 +1133,10 @@ const wss = new WebSocketServer({
       console.warn(`[jarvis] rejected websocket on path ${path}`)
       return done(false, 403, 'Forbidden')
     }
+    if (!hostAllowed(req.headers.host)) {
+      console.warn(`[jarvis] rejected websocket for host ${req.headers.host ?? '(none)'}`)
+      return done(false, 403, 'Forbidden')
+    }
     if (!originAllowed(origin)) {
       console.warn(
         `[jarvis] rejected websocket from origin ${origin ?? '(none)'}` +
@@ -1085,9 +1147,29 @@ const wss = new WebSocketServer({
     done(true)
   },
 })
-server.listen(PORT)
+// A port someone else holds is the commonest reason the bridge won't start, and
+// Node's default is an unhandled 'error' event and a stack trace. Say it plainly
+// and exit non-zero, so a launcher knows the brain never came up.
+server.on('error', (err) => {
+  console.error(
+    err.code === 'EADDRINUSE'
+      ? `[jarvis] port ${PORT} on ${HOST} is already in use — stop whatever holds it or set JARVIS_BRIDGE_PORT`
+      : `[jarvis] bridge could not listen on ${HOST}:${PORT}: ${err.message}`,
+  )
+  process.exit(1)
+})
+await new Promise((resolve) => server.listen(PORT, HOST, resolve))
 
-console.log(`[jarvis] bridge listening on ws://localhost:${PORT}`)
+const LOOPBACK = HOST === '127.0.0.1' || HOST === '::1' || HOST === 'localhost'
+const bound = server.address()
+console.log(
+  `[jarvis] bridge listening on ws://${bound.family === 'IPv6' ? `[${bound.address}]` : bound.address}:${bound.port}`,
+)
+if (!LOOPBACK) {
+  console.warn(
+    `[jarvis] WARNING: listening on ${HOST}, not loopback — other machines on this network can reach the bridge`,
+  )
+}
 console.log(
   `[jarvis] speech ${
     ttsProvider() === 'fish'
@@ -1099,6 +1181,10 @@ console.log(
 )
 console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
 console.log(
+  `[jarvis] MCP servers from config: ${Object.keys(MCP_SERVERS).join(', ') || 'none'}` +
+    (ACCOUNT_CONNECTORS ? ' · account connectors ON' : ' · account connectors off'),
+)
+console.log(
   `[jarvis] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
     (ALLOW_WRITES ? '' : ' — set JARVIS_ALLOW_WRITES=1 to permit shell/file/device actions'),
 )
@@ -1106,7 +1192,8 @@ console.log(
 // at all because an extension that is simply not running is indistinguishable
 // at the tool boundary from one that is broken, and this is the one place the
 // difference can be stated before anybody asks a question that depends on it.
-void chromeAvailable().then((ok) => {
+if (DISABLED.size) console.log(`[jarvis] disabled: ${[...DISABLED].join(', ')}`)
+if (!DISABLED.has('browser')) void chromeAvailable().then((ok) => {
   console.log(
     ok
       ? `[jarvis] browser control ready${ALLOW_WRITES ? '' : ' (reading only — clicking and typing need JARVIS_ALLOW_WRITES=1)'}`
@@ -1248,6 +1335,18 @@ wss.on('connection', (socket) => {
   let settling = Promise.resolve()
   let finishTurn = null
 
+  /**
+   * Which question a deliberate interrupt is cancelling.
+   *
+   * The SDK has no 'cancelled' result subtype — an interrupted turn comes back
+   * as error_during_execution, identical at the result to a turn that genuinely
+   * broke. Recording what was cancelled tells the two apart, so a barge-in
+   * stops announcing a failure that did not happen. Held as the id rather than
+   * a bare flag because an interrupt that arrives with no turn in flight would
+   * otherwise leave the flag standing and swallow the next real failure.
+   */
+  let cancelledAsk = null
+
   const turnFinished = () =>
     new Promise((resolve) => {
       finishTurn = resolve
@@ -1295,27 +1394,38 @@ wss.on('connection', (socket) => {
         jarvis: displayServer(
           (panel) => send({ type: 'panel', panel }),
           (blade) => send({ type: 'blade', blade }),
+          { camera: !DISABLED.has('camera') },
         ),
         // The interface controls, on the same socket. A separate key because
         // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
         // one server; the underscore in it is why decideTool and announceTool
         // both name `jarvis_ui` explicitly.
-        jarvis_ui: uiServer((op, args) => send({ type: 'ui', op, args })),
+        ...(DISABLED.has('interface')
+          ? {}
+          : { jarvis_ui: uiServer((op, args) => send({ type: 'ui', op, args })) }),
         // The user's own Chrome, over the extension's native-host socket. It
         // holds no per-connection state, but it is built here with the rest so
         // the write gate is read once, at the same point as everything else.
-        jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
+        ...(DISABLED.has('browser')
+          ? {}
+          : { jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) }),
         // The camera, which unlike everything else here has to ask and wait.
-        jarvis_eyes: visionServer(ask),
+        ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(ask) }),
       },
       // A plain system prompt, not the claude_code preset. The preset is
       // tuned for a coding agent — verbose, file-oriented, and a large chunk
       // of input tokens on every turn. Replacing it makes the persona stick,
       // keeps answers short enough to speak, and cuts cost per turn.
       systemPrompt: SYSTEM_PROMPT,
-      // Run from the home directory so project-scoped MCP servers don't shadow
-      // the global ones, and so file tools have a sane root.
-      cwd: homedir(),
+      // Run from JARVIS's own workspace rather than the home directory. MCP
+      // discovery does not depend on it — settingSources is empty and the
+      // servers are passed in explicitly above — and file tools resolve
+      // relative paths, and get auto-approved, only inside it.
+      cwd: WORKSPACE,
+      // Only the built-ins JARVIS uses. Everything else is not merely denied
+      // but absent from the model's context. See builtinTools in policy.mjs.
+      tools: builtinTools(ALLOW_WRITES),
+      hooks: { PreToolUse: [{ hooks: [enforcePolicy] }] },
       // No filesystem settings at all. Left to its default the SDK loads
       // ~/.claude/settings.json and settings.local.json exactly as the CLI
       // does — which on a working machine means a bypassPermissions default
@@ -1329,6 +1439,7 @@ wss.on('connection', (socket) => {
       // The cost is that MCP servers stop being discovered too, which is why
       // mcpServers above passes them in by hand.
       settingSources: [],
+      strictMcpConfig: !ACCOUNT_CONNECTORS,
       // Stated explicitly, and it has to be.
       //
       // With no `model` here the SDK falls back to its own default, which on
@@ -1340,6 +1451,18 @@ wss.on('connection', (socket) => {
       model: MODEL,
       effort: EFFORT,
       maxTurns: 24,
+      // Nothing resumes a JARVIS session — every socket starts a new one — so
+      // the transcript the SDK writes by default is only ever a record: every
+      // question, every tool result (a page JARVIS read, a mail it opened, a
+      // camera frame as base64) in ~/.claude/projects, beside your own Claude
+      // Code history and listed by `claude --resume`. Off unless asked for.
+      persistSession: process.env.JARVIS_KEEP_TRANSCRIPTS === '1',
+      // Run the agent through something else — typically a sandbox wrapper
+      // (bubblewrap, firejail, sandbox-exec) that execs the real CLI with the
+      // arguments it was given. The SDK's bundled CLI is used when unset.
+      ...(process.env.JARVIS_CLAUDE_EXECUTABLE
+        ? { pathToClaudeCodeExecutable: process.env.JARVIS_CLAUDE_EXECUTABLE }
+        : {}),
       permissionMode: 'default',
       // Without this the SDK only emits whole assistant messages, and JARVIS
       // would sit silent until the entire answer was written. Partial events
@@ -1349,11 +1472,11 @@ wss.on('connection', (socket) => {
       // PermissionResult object. Returning a bare boolean silently denies
       // everything, with the tool name arriving undefined.
       //
-      // Worth knowing: this is a last gate, not the only one. Calls the CLI
+      // Worth knowing: this is the second gate, not the first. Calls the CLI
       // has already settled never arrive here — its own classifier waves
-      // through a `Bash: echo hello` without asking, and only reaches us for
-      // something with a consequence, like a `touch`. So a deny here is
-      // reliable; an absence of a call here is not proof nothing ran.
+      // through a `Bash: cat file` or a Read inside the working directory
+      // without asking. The PreToolUse hook above is what sees those; this
+      // stays so that anything the CLI does ask about is still decided here.
       canUseTool: async (toolName) => {
         const ok = decideTool(toolName)
         console.log(`[jarvis] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
@@ -1377,7 +1500,14 @@ wss.on('connection', (socket) => {
     try {
       for await (const msg of session) {
         if (process.env.JARVIS_DEBUG === '1') {
-          console.log('[msg]', msg.type, msg.event?.type ?? '')
+          console.log(
+            '[msg]',
+            msg.type,
+            msg.event?.type ?? '',
+            msg.type === 'result' ? `subtype=${msg.subtype} result=${JSON.stringify(msg.result)}` : '',
+            msg.type === 'assistant' ? JSON.stringify(msg.message?.content ?? msg.content) : '',
+            msg.type === 'system' && msg.subtype === 'init' ? JSON.stringify(msg.mcp_servers) : '',
+          )
         }
 
         switch (msg.type) {
@@ -1441,6 +1571,13 @@ wss.on('connection', (socket) => {
                 text: msg.result ?? '',
                 costUsd: msg.total_cost_usd ?? null,
               })
+            } else if (cancelledAsk !== null && cancelledAsk === answering) {
+              // Cancelled on purpose. The client bumps its turn counter before
+              // interrupting, so it is already discarding anything tagged with
+              // this id — sending an error would be a message nobody reads,
+              // and logging one puts a failure in the log for a feature that
+              // worked.
+              console.log('[jarvis] turn interrupted')
             } else {
               console.error(
                 `[jarvis] turn failed: ${msg.subtype}`,
@@ -1451,6 +1588,7 @@ wss.on('connection', (socket) => {
                 message: RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default,
               })
             }
+            cancelledAsk = null
             // Whatever was waiting on this turn to finish can go now. This is
             // the only place a turn is genuinely over.
             finishTurn?.()
@@ -1534,6 +1672,9 @@ wss.on('connection', (socket) => {
     }
 
     if (msg.type === 'interrupt') {
+      // Marks the turn in flight as cancelled on purpose, so the failed result
+      // it is about to produce is not reported as a fault.
+      cancelledAsk = answering
       // Held so the next question can wait for it rather than racing it.
       const stopped = turnFinished()
       settling = Promise.resolve(session.interrupt?.())

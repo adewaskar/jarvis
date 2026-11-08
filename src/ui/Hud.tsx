@@ -229,7 +229,7 @@ export function Hud() {
       <aside className="rail rail-right">
         <div className="rail-title">SIGNAL</div>
         <div className="meter">
-          <div className="meter-fill" style={{ height: `${level * 100}%` }} />
+          <div className="meter-fill" style={{ transform: `scaleY(${level})` }} />
         </div>
         <div className="rail-item mono">{(level * 100).toFixed(0).padStart(3, '0')}%</div>
       </aside>

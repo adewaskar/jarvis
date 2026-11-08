@@ -317,7 +317,22 @@ argument. You know those things. Overrule it whenever you have reason to.`
  * @param {(panel: object) => void} emit - pushes the panel to the browser
  * @param {(blade: object) => void} emitBlade - pushes a blade to the browser
  */
-export function displayServer(emit, emitBlade) {
+/**
+ * The blade tool without the live camera view, for when the camera is switched
+ * off (JARVIS_DISABLE=camera). Leaving the kind in would let a blade turn on the
+ * very camera the user switched off.
+ */
+const CAMERA_BLADE =
+  /  camera  — the live view from the user's camera[\s\S]*?Needs no url\.\n/
+const NO_CAMERA_DESCRIPTION = BLADE_DESCRIPTION.replace(CAMERA_BLADE, '')
+const noCameraSchema = {
+  ...bladeSchema,
+  kind: z
+    .enum(['article', 'image', 'gallery', 'video', 'embed', 'markup'])
+    .describe('What is being opened. See the tool description.'),
+}
+
+export function displayServer(emit, emitBlade, { camera = true } = {}) {
   return createSdkMcpServer({
     name: 'jarvis',
     version: '1.0.0',
@@ -377,7 +392,11 @@ export function displayServer(emit, emitBlade) {
         return { content: [{ type: 'text', text: 'On screen.' }] }
       }),
 
-      tool('blade', BLADE_DESCRIPTION, bladeSchema, async (args) => {
+      tool(
+        'blade',
+        camera ? BLADE_DESCRIPTION : NO_CAMERA_DESCRIPTION,
+        camera ? bladeSchema : noCameraSchema,
+        async (args) => {
         const kind = args.kind
         const url = String(args.url ?? '').trim()
         const images = Array.isArray(args.images) ? args.images.filter(Boolean) : []
