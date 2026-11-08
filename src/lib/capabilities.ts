@@ -20,8 +20,10 @@ import { BACKEND, BRIDGE_HTTP_URL, env } from '../config'
 export type Capabilities = {
   /** ElevenLabs speech-to-text (Scribe) is reachable via the bridge. */
   stt: boolean
-  /** ElevenLabs text-to-speech is reachable via the bridge. */
+  /** A cloud voice is reachable via the bridge's /tts. */
   tts: boolean
+  /** Which cloud voice /tts uses, when `tts` is on. */
+  voice?: 'fish' | 'elevenlabs' | null
 }
 
 /** Browser-only until the probe says otherwise. Safe default: the app works. */
@@ -56,8 +58,13 @@ export async function probeCapabilities(): Promise<Capabilities> {
       signal: AbortSignal.timeout(3000),
     })
     if (res.ok) {
-      const h = (await res.json()) as { stt?: boolean; tts?: boolean }
-      current = { stt: Boolean(h.stt), tts: Boolean(h.tts) }
+      const h = (await res.json()) as Partial<Capabilities>
+      current = {
+        stt: Boolean(h.stt),
+        tts: Boolean(h.tts),
+        // Older bridges report no provider; their voice was always ElevenLabs.
+        voice: h.tts ? (h.voice ?? 'elevenlabs') : null,
+      }
     }
   } catch {
     // Bridge down or slow — stay on the browser engines rather than blocking
@@ -70,6 +77,7 @@ export async function probeCapabilities(): Promise<Capabilities> {
 /** A short human label for the HUD: what voice stack is actually in play. */
 export function engineLabel(): string {
   const c = current
+  if (c.tts && c.voice === 'fish') return c.stt ? 'Fish Audio + Scribe' : 'Fish Audio voice'
   if (c.stt && c.tts) return 'ElevenLabs'
   if (c.tts) return 'ElevenLabs voice'
   // env.elevenKey is only meaningful in direct mode; harmless to mention.

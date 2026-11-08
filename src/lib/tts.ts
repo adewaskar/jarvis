@@ -62,7 +62,7 @@ const ECHO_TAIL_MS = 1800
  * indistinguishable. This tells them apart at a glance.
  */
 export const diag = {
-  engine: 'system' as 'system' | 'kokoro' | 'elevenlabs',
+  engine: 'system' as 'system' | 'kokoro' | 'elevenlabs' | 'fish',
   /** Utterances handed to an engine — the OS voice or an audio element. */
   spoken: 0,
   /**
@@ -244,6 +244,7 @@ function pickVoice(): SpeechSynthesisVoice | null {
  *  always naming a speechSynthesis voice that a cloud or neural engine has
  *  quietly replaced. */
 export function currentVoiceName(): string {
+  if (caps().tts && caps().voice === 'fish') return 'Fish Audio'
   if (USE_ELEVENLABS || caps().tts) return 'ElevenLabs'
   if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
     return KOKORO_VOICE.replace(/^bm_/, '')
@@ -329,10 +330,14 @@ function shape(text: string): string {
   )
 }
 
+/** Generated audio, tagged with the engine that actually produced it — the
+ *  bridge can fail and the direct ElevenLabs key answer instead. */
+type AudioResult = { url: string; engine: 'kokoro' | 'elevenlabs' | 'fish' }
+
 type Item = {
   text: string
   /** Generation starts one sentence ahead, not all at once. */
-  audio?: Promise<string | null> | null
+  audio?: Promise<AudioResult | null> | null
 }
 
 export function createSpeaker(): Speaker {
@@ -372,7 +377,7 @@ export function createSpeaker(): Speaker {
   }
 
   /** null means "no audio pipeline, use the system voice directly". */
-  function synthesise(text: string): Promise<string | null> | null {
+  function synthesise(text: string): Promise<AudioResult | null> | null {
     // Prefer the ElevenLabs voice whenever the bridge reports it is available —
     // for a demo the timbre is worth the round trip, and this is what makes the
     // premium path automatic with no flag to set. It falls back to the browser
@@ -384,12 +389,15 @@ export function createSpeaker(): Speaker {
       // for a session that had spoken every one of its sentences through
       // ElevenLabs, which makes the one field naming the engine useless
       // exactly when you are trying to work out which engine is at fault.
-      diag.engine = 'elevenlabs'
+      diag.engine = caps().voice === 'fish' ? 'fish' : 'elevenlabs'
       return fetchCloudAudio(text).catch(() => null)
     }
     if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
       diag.engine = 'kokoro'
-      return kokoro.speak(text).catch(() => null)
+      return kokoro
+        .speak(text)
+        .then((url) => (url ? { url, engine: 'kokoro' as const } : null))
+        .catch(() => null)
     }
     diag.engine = 'system'
     return null
@@ -427,14 +435,18 @@ export function createSpeaker(): Speaker {
     if (cancelled) return
     setSpeaking(item.text)
     try {
-      const url = item.audio ? await item.audio : null
+      const audio = item.audio ? await item.audio : null
       if (cancelled) return
       // A failed generation is not a failed turn — drop to the system voice.
-      if (url) {
-        await playUrl(url, item.text)
+      // diag.engine is set again here, at playback, so it names the engine
+      // that was actually heard rather than the one that was attempted.
+      if (audio) {
+        diag.engine = audio.engine
+        await playUrl(audio.url, item.text)
         return
       }
 
+      diag.engine = 'system'
       const spoke = await speakNative(item.text)
       if (spoke || cancelled) return
 
@@ -446,13 +458,14 @@ export function createSpeaker(): Speaker {
       if (!nativeBroken) {
         nativeBroken = true
         diag.nativeBroken = true
-        diag.engine = 'elevenlabs'
+        diag.engine = caps().voice === 'fish' ? 'fish' : 'elevenlabs'
         console.warn('[jarvis] system voice is not producing sound — using the bridge speech proxy from here on')
       }
       const rescue = await fetchCloudAudio(item.text).catch(() => null)
       if (rescue && !cancelled) {
         diag.rescued++
-        await playUrl(rescue, item.text)
+        diag.engine = rescue.engine
+        await playUrl(rescue.url, item.text)
       }
     } finally {
       if (speaking === item.text) setSpeaking('')
@@ -591,7 +604,8 @@ export function createSpeaker(): Speaker {
       // see the onplaying handler below.
       diag.spoken++
       diag.lastText = text.slice(0, 60)
-      diag.voice = diag.engine === 'kokoro' ? KOKORO_VOICE : 'ElevenLabs'
+      diag.voice =
+        diag.engine === 'kokoro' ? KOKORO_VOICE : diag.engine === 'fish' ? 'Fish Audio' : 'ElevenLabs'
 
       let read: (() => number) | null = null
       const ctx = outputContext()
@@ -738,7 +752,7 @@ export function createSpeaker(): Speaker {
 
 /** Only used when USE_ELEVENLABS is on. Bridge proxy first (it already holds
  *  the key), then a direct key, then null to fall back to the native voice. */
-async function fetchCloudAudio(text: string): Promise<string | null> {
+async function fetchCloudAudio(text: string): Promise<AudioResult | null> {
   if (BACKEND === 'bridge') {
     try {
       const res = await fetch(`${BRIDGE_HTTP_URL}/tts`, {
@@ -746,7 +760,12 @@ async function fetchCloudAudio(text: string): Promise<string | null> {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text }),
       })
-      if (res.ok) return URL.createObjectURL(await res.blob())
+      if (res.ok) {
+        return {
+          url: URL.createObjectURL(await res.blob()),
+          engine: caps().voice === 'fish' ? 'fish' : 'elevenlabs',
+        }
+      }
     } catch {
       /* fall through */
     }
@@ -774,7 +793,9 @@ async function fetchCloudAudio(text: string): Promise<string | null> {
           }),
         },
       )
-      if (res.ok) return URL.createObjectURL(await res.blob())
+      if (res.ok) {
+        return { url: URL.createObjectURL(await res.blob()), engine: 'elevenlabs' }
+      }
     } catch {
       /* fall through */
     }

@@ -103,6 +103,21 @@ if (elSource) {
   line(info, '  Optional: add ELEVENLABS_API_KEY for a better voice and Scribe transcription. The free tier is enough for a demo.');
 }
 
+// --- Fish Audio key (env or .env.local) ----------------------------------
+let fishSource = process.env.FISH_API_KEY?.trim() ? 'environment (FISH_API_KEY)' : null;
+if (!fishSource) {
+  try {
+    if (/^\s*FISH_API_KEY\s*=\s*\S/m.test(readFileSync(new URL('../.env.local', import.meta.url), 'utf8'))) {
+      fishSource = '.env.local';
+    }
+  } catch {
+    // no .env.local
+  }
+}
+if (fishSource) {
+  line(tick, `Fish Audio voice enabled — key found via ${fishSource}. It takes over speech from ElevenLabs.`);
+}
+
 // --- How to run ----------------------------------------------------------
 console.log('');
 console.log('To run JARVIS, open two terminals:');

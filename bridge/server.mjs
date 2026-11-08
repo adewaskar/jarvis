@@ -35,6 +35,31 @@ import {
   fileRoots,
 } from './policy.mjs'
 
+/**
+ * Server-side secrets from .env.local.
+ *
+ * The bridge used to read only its shell environment, so a FISH_API_KEY saved
+ * in .env.local did nothing. Load it here — the bridge is the one process that
+ * may hold keys. Vite reads the same file but only ever exposes VITE_ names to
+ * the browser, so an unprefixed key never reaches the bundle. Values already in
+ * the shell win; a missing file is fine.
+ *
+ * Parsed here rather than with process.loadEnvFile, which only exists from
+ * Node 20.12 — package.json still allows 20.0, where it would silently do
+ * nothing and the key would never load.
+ */
+try {
+  const envText = readFileSync(new URL('../.env.local', import.meta.url), 'utf8')
+  for (const line of envText.split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:export\s+)?([\w.-]+)\s*=\s*(.*?)\s*$/)
+    if (!m || m[1] in process.env) continue
+    const quoted = m[2].match(/^(['"`])(.*)\1$/)
+    process.env[m[1]] = quoted ? quoted[2] : m[2].replace(/\s+#.*$/, '')
+  }
+} catch {
+  /* no .env.local — shell environment only */
+}
+
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
 
 /**
@@ -512,6 +537,78 @@ function elevenKey() {
 const VOICE_ID = process.env.JARVIS_VOICE_ID ?? 'JBFqnCBsd6RMkjVDRZzb'
 
 /**
+ * Fish Audio voice. When FISH_API_KEY is set it takes over speech output from
+ * ElevenLabs; transcription is untouched (Scribe if an ElevenLabs key exists,
+ * otherwise the browser recogniser). FISH_VOICE_ID is sent as Fish's
+ * `reference_id`, and FISH_MODEL as its `model` header.
+ */
+const fishKey = () => process.env.FISH_API_KEY || null
+// Blank counts as unset: an empty reference_id would not pick the default.
+const FISH_VOICE_ID =
+  process.env.FISH_VOICE_ID?.trim() || '14129c3e320149449d6bada6862f7338'
+// The free tier by default: a paid model has to be chosen on purpose. Fish
+// bills an empty or unknown model name as s2.1-pro, so anything that is not a
+// known id — blank, whitespace, a typo — falls back to free, with a warning.
+const FISH_MODELS = ['s2.1-pro-free', 's2.1-pro', 's2-pro', 's1', 'drama-3']
+const FISH_MODEL = (() => {
+  const want = (process.env.FISH_MODEL ?? '').trim()
+  if (FISH_MODELS.includes(want)) return want
+  if (want) {
+    console.warn(`[jarvis] unknown FISH_MODEL "${want}" — using s2.1-pro-free`)
+  }
+  return 's2.1-pro-free'
+})()
+
+/** Which cloud voice /tts will use, or null for the browser's own. */
+const ttsProvider = () =>
+  fishKey() ? 'fish' : elevenKey() ? 'elevenlabs' : null
+
+/** One line of speech from Fish Audio, as a streaming mp3 response. */
+const fishSpeech = (text) =>
+  fetch('https://api.fish.audio/v1/tts', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${fishKey()}`,
+      'content-type': 'application/json',
+      model: FISH_MODEL,
+    },
+    body: JSON.stringify({
+      text,
+      reference_id: FISH_VOICE_ID,
+      format: 'mp3',
+      mp3_bitrate: 64,
+      // 'balanced' is Fish's low-latency mode — the same trade the
+      // ElevenLabs path makes with Flash.
+      latency: 'balanced',
+    }),
+  })
+
+/** One line of speech from ElevenLabs, as a streaming mp3 response. */
+const elevenSpeech = (text) =>
+  fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream` +
+      // 22kHz mono is half the bytes of 44kHz and indistinguishable through
+      // a laptop speaker; optimize_streaming_latency=3 trades a little
+      // prosody for a much earlier first byte.
+      `?output_format=mp3_22050_32&optimize_streaming_latency=3`,
+    {
+      method: 'POST',
+      headers: { 'xi-api-key': elevenKey(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        // Flash is the low-latency model — a conversation needs speed more
+        // than it needs the last few percent of quality.
+        model_id: 'eleven_flash_v2_5',
+        voice_settings: {
+          stability: 0.4,
+          similarity_boost: 0.75,
+          speed: 1.05,
+        },
+      }),
+    },
+  )
+
+/**
  * Where /file is permitted to read from, and how big a read may get.
  *
  * The roots are realpath'd once at boot so the containment check below compares
@@ -736,13 +833,16 @@ const handleRequest = async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/health') {
     // The browser reads this once at boot to decide which voice engine to use.
-    // Both premium paths ride the same ElevenLabs key, so both flags track it:
-    // with a key the app transcribes with Scribe and speaks with ElevenLabs;
-    // without one it falls back to the browser's own recogniser and voice, so a
-    // student with nothing configured still has a working assistant.
-    const eleven = Boolean(elevenKey())
+    // `stt` tracks the ElevenLabs key (Scribe); `tts` is on when either cloud
+    // voice is configured, and `voice` names which one — Fish Audio wins when
+    // both keys exist. With nothing configured the app falls back to the
+    // browser's own recogniser and voice, so a student with no keys still has
+    // a working assistant.
+    const voice = ttsProvider()
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
-    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven }))
+    return res.end(
+      JSON.stringify({ ok: true, tts: Boolean(voice), stt: Boolean(elevenKey()), voice }),
+    )
   }
 
   // Serve local image files to the page. Screenshots and generated art land on
@@ -865,10 +965,10 @@ const handleRequest = async (req, res) => {
   }
 
   if (req.method === 'POST' && req.url === '/tts') {
-    const key = elevenKey()
-    if (!key) {
+    const provider = ttsProvider()
+    if (!provider) {
       res.writeHead(503, cors)
-      return res.end('no elevenlabs key')
+      return res.end('no speech key')
     }
     // A spoken line is a few hundred bytes. Anything approaching this is not a
     // sentence, and buffering it unbounded would let one request eat the heap.
@@ -899,29 +999,13 @@ const handleRequest = async (req, res) => {
       res.writeHead(400, cors)
       return res.end('no text')
     }
+    if (typeof text !== 'string') {
+      res.writeHead(400, cors)
+      return res.end('text must be a string')
+    }
     try {
-      const upstream = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream` +
-          // 22kHz mono is half the bytes of 44kHz and indistinguishable through
-          // a laptop speaker; optimize_streaming_latency=3 trades a little
-          // prosody for a much earlier first byte.
-          `?output_format=mp3_22050_32&optimize_streaming_latency=3`,
-        {
-          method: 'POST',
-          headers: { 'xi-api-key': key, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            text,
-            // Flash is the low-latency model — a conversation needs speed more
-            // than it needs the last few percent of quality.
-            model_id: 'eleven_flash_v2_5',
-            voice_settings: {
-              stability: 0.4,
-              similarity_boost: 0.75,
-              speed: 1.05,
-            },
-          }),
-        },
-      )
+      const upstream =
+        provider === 'fish' ? await fishSpeech(text) : await elevenSpeech(text)
       if (!upstream.ok) {
         res.writeHead(upstream.status, cors)
         return res.end(await upstream.text())
@@ -937,6 +1021,9 @@ const handleRequest = async (req, res) => {
       for await (const chunk of upstream.body) res.write(Buffer.from(chunk))
       return res.end()
     } catch (err) {
+      // Mid-stream failure: the 200 is already out, so cut the connection —
+      // the browser's fetch then rejects and it falls back to its own voice.
+      if (res.headersSent) return res.destroy()
       res.writeHead(502, cors)
       return res.end(String(err?.message ?? err))
     }
@@ -1084,7 +1171,13 @@ if (!LOOPBACK) {
   )
 }
 console.log(
-  `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
+  `[jarvis] speech ${
+    ttsProvider() === 'fish'
+      ? `via Fish Audio (voice ${FISH_VOICE_ID}, model ${FISH_MODEL})`
+      : ttsProvider() === 'elevenlabs'
+        ? 'via ElevenLabs'
+        : 'using browser fallback voice'
+  }`,
 )
 console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
 console.log(
