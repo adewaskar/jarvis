@@ -1,12 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap');
+@import '../design-system/tokens.css';
 
 :root {
-  /* The interface cyan. `--accent` is re-declared per phase and per panel;
-     this one stays put and is what anything neutral pins itself to. */
-  --interface: #00e5ff;
-  --accent: var(--interface);
-  --bg: #01060c;
-  font-family: 'Chakra Petch', system-ui, sans-serif;
+  /* Every colour, size, glow and tempo lives in design-system/tokens.json;
+     the generated tokens.css imported above declares them as custom
+     properties. `--accent` starts as the interface cyan and is re-declared
+     per phase on .hud and per card on .panel-*. */
+  font-family: var(--font-display);
   color-scheme: dark;
 }
 
@@ -31,11 +31,11 @@ body::after {
   pointer-events: none;
   z-index: 5;
   background:
-    radial-gradient(ellipse at center, transparent 30%, rgba(0, 0, 0, 0.55) 100%),
+    radial-gradient(ellipse at center, transparent 30%, var(--vignette) 100%),
     repeating-linear-gradient(
       0deg,
-      rgba(0, 229, 255, 0.028) 0px,
-      rgba(0, 229, 255, 0.028) 1px,
+      var(--scanline) 0px,
+      var(--scanline) 1px,
       transparent 1px,
       transparent 3px
     );
@@ -154,7 +154,7 @@ body::after {
   opacity: 0.82;
 }
 .rail-item.dim { opacity: 0.3; }
-.rail-item.mono { font-family: 'JetBrains Mono', monospace; letter-spacing: 0.1em; }
+.rail-item.mono { font-family: var(--font-mono); letter-spacing: 0.1em; }
 
 .tick {
   width: 5px;
@@ -203,7 +203,7 @@ body::after {
   padding: 7px 16px 7px 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
   border-radius: 2px;
-  background: color-mix(in srgb, var(--accent) 9%, rgba(2, 10, 12, 0.55));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-chip));
   backdrop-filter: blur(5px);
   box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 22%, transparent);
   /* Above the panels and the log so a long tool name reads cleanly, but it is a
@@ -232,7 +232,7 @@ body::after {
   max-width: min(52vw, 620px);
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #f2fbff;
+  color: var(--ink-tool);
   text-shadow: 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
@@ -288,7 +288,7 @@ body::after {
 
 .log-user .log-text { opacity: 0.52; }
 .log-jarvis .log-text {
-  color: #eaf9ff;
+  color: var(--ink-reply);
   text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
@@ -302,7 +302,7 @@ body::after {
   font-size: 16px;
   text-transform: none;
   letter-spacing: 0.02em;
-  color: #fff;
+  color: var(--ink-caption);
   opacity: 0.85;
   max-width: 66vw;
   text-align: center;
@@ -313,7 +313,7 @@ body::after {
   left: 50%;
   bottom: 52px;
   transform: translateX(-50%);
-  color: #ff6b6b;
+  color: var(--error);
   font-size: 10px;
   text-transform: none;
   letter-spacing: 0.04em;
@@ -333,7 +333,7 @@ body::after {
 }
 
 kbd {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   border: 1px solid currentColor;
   padding: 1px 5px;
   font-size: 9px;
@@ -390,10 +390,10 @@ kbd {
    while every explicitly accented panel holds still. A panel is a record of a
    moment; it should stop changing colour once it has landed. */
 .panel-default { --accent: var(--interface); }
-.panel-amber  { --accent: #ffb547; }
-.panel-violet { --accent: #c77dff; }
-.panel-green  { --accent: #5affc8; }
-.panel-red    { --accent: #ff6b6b; }
+.panel-amber  { --accent: var(--panel-amber); }
+.panel-violet { --accent: var(--panel-violet); }
+.panel-green  { --accent: var(--panel-green); }
+.panel-red    { --accent: var(--panel-red); }
 
 .panel {
   position: relative;
@@ -527,7 +527,7 @@ kbd {
 
 .hud-idx {
   flex: 0 0 auto;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   opacity: 0.45;
   padding-top: 2px;
@@ -544,7 +544,7 @@ kbd {
 .hud-label {
   font-size: 12.5px;
   line-height: 1.35;
-  color: #e8f8ff;
+  color: var(--ink-label);
   /* Two lines then clip — a HUD row, not a paragraph. */
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -650,7 +650,7 @@ kbd {
   width: 100%;
   max-width: 100%;
   max-height: 300px;
-  background: #000;
+  background: var(--surface-media);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   /* Controls are the whole point of a player. */
   pointer-events: auto;
@@ -665,7 +665,7 @@ kbd {
   max-width: 100%;
   aspect-ratio: 16 / 9;
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
-  background: #000;
+  background: var(--surface-media);
   overflow: hidden;
   pointer-events: auto;
 }
@@ -703,10 +703,10 @@ kbd {
 
 .hud-metric {
   display: block;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 40px;
   line-height: 1;
-  color: #eafaff;
+  color: var(--ink-metric);
   text-shadow: 0 0 30px color-mix(in srgb, var(--accent) 65%, transparent);
 }
 
@@ -724,7 +724,7 @@ kbd {
   font-size: 12px;
   line-height: 1.55;
   opacity: 0.8;
-  color: #dff4ff;
+  color: var(--ink-note);
 }
 
 .hud-grid {
@@ -805,19 +805,19 @@ kbd {
   z-index: 7;
   display: grid;
   place-items: center;
-  background: radial-gradient(ellipse at center, #04121c 0%, #01060c 70%);
+  background: radial-gradient(ellipse at center, var(--ignition-core) 0%, var(--bg) 70%);
   border: 0;
   cursor: pointer;
   font-family: inherit;
-  color: #4fd6ff;
+  color: var(--ignition-ink);
 }
 
 .ignition-ring {
   position: absolute;
   width: 240px;
   height: 240px;
-  border: 1px solid rgba(79, 214, 255, 0.28);
-  border-top-color: rgba(79, 214, 255, 0.9);
+  border: 1px solid color-mix(in srgb, var(--ignition-ink) 28%, transparent);
+  border-top-color: color-mix(in srgb, var(--ignition-ink) 90%, transparent);
   border-radius: 50%;
 }
 
@@ -832,7 +832,7 @@ kbd {
   font-size: 15px;
   letter-spacing: 0.52em;
   text-indent: 0.52em; /* balance the trailing letter-space */
-  text-shadow: 0 0 30px rgba(79, 214, 255, 0.7);
+  text-shadow: 0 0 30px color-mix(in srgb, var(--ignition-ink) 70%, transparent);
 }
 
 .ignition-sub {
@@ -843,7 +843,7 @@ kbd {
 }
 
 .ignition:hover .ignition-word {
-  text-shadow: 0 0 44px rgba(79, 214, 255, 1);
+  text-shadow: 0 0 44px var(--ignition-ink);
 }
 
 /* ------------------------------------------------------------------- boot */
@@ -883,11 +883,11 @@ kbd {
 .boot-bar-title {
   display: inline-flex;
   align-items: center;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: clamp(18px, 3.4vw, 40px);
   font-weight: 300;
   letter-spacing: 0.14em;
-  color: #eafcff;
+  color: var(--ink-boot);
   text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 .boot-dots { opacity: 0.6; margin: 0 0.2em; }
@@ -915,7 +915,7 @@ kbd {
 
 .boot-log {
   margin-top: 14px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.9;
   letter-spacing: 0.06em;
@@ -950,8 +950,8 @@ kbd {
   filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 50%, transparent));
 }
 .boot-name {
-  fill: #eafcff;
-  font-family: 'JetBrains Mono', monospace;
+  fill: var(--ink-boot);
+  font-family: var(--font-mono);
   font-size: 20px;
   text-anchor: middle;
   dominant-baseline: middle;
@@ -969,7 +969,7 @@ kbd {
 .boot-tag {
   fill: var(--accent);
   opacity: 0.55;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.14em;
   text-anchor: middle;
@@ -979,7 +979,7 @@ kbd {
   stroke: color-mix(in srgb, var(--accent) 30%, transparent);
   stroke-width: 8;
 }
-.boot-r-on { stroke: #dffbff; filter: drop-shadow(0 0 8px var(--accent)); }
+.boot-r-on { stroke: var(--ink-reactor-lit); filter: drop-shadow(0 0 8px var(--accent)); }
 .boot-r-ring {
   fill: none;
   stroke: var(--accent);
@@ -989,18 +989,18 @@ kbd {
 .boot-r-ring-in { stroke-width: 1.5; opacity: calc(0.2 + var(--glow) * 0.5); }
 .boot-r-tri {
   fill: color-mix(in srgb, var(--accent) calc(var(--glow) * 45%), transparent);
-  stroke: #eafcff;
+  stroke: var(--ink-boot);
   stroke-width: 3;
   stroke-linejoin: round;
   filter: drop-shadow(0 0 calc(var(--glow) * 26px) var(--accent));
 }
 .boot-r-tri-in {
-  fill: color-mix(in srgb, #eafcff calc(var(--glow) * 60%), transparent);
+  fill: color-mix(in srgb, var(--ink-boot) calc(var(--glow) * 60%), transparent);
   stroke: none;
 }
 .boot-r-v {
   fill: none;
-  stroke: #05161a;
+  stroke: var(--reactor-vector);
   stroke-width: 3.5;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -1114,7 +1114,7 @@ kbd {
 .ins-label {
   fill: var(--ins);
   opacity: 0.75;
-  font: 400 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  font: 400 13px/1 var(--font-system-mono);
   letter-spacing: 0.18em;
   text-anchor: middle;
   dominant-baseline: middle;
@@ -1165,7 +1165,7 @@ kbd {
 .decode-ghost {
   /* Monospace on purpose: the noise should read as a readout rather than as a
      word that has been mistyped. */
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
   color: var(--accent);
   opacity: 0.62;
@@ -1266,11 +1266,11 @@ kbd {
 .blade-tool {
   display: block;
   white-space: nowrap;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: #e6f9ff;
+  color: var(--ink-blade);
   text-shadow:
     0 0 18px var(--accent),
     0 0 44px color-mix(in srgb, var(--accent) 55%, transparent);
@@ -1432,8 +1432,8 @@ kbd {
   animation: fxChroma 620ms steps(2, end) both;
 }
 
-.fx-glitch::before { background: rgba(255, 40, 90, 0.13) }
-.fx-glitch::after  { background: rgba(40, 220, 255, 0.13); animation-direction: reverse }
+.fx-glitch::before { background: var(--glitch-magenta) }
+.fx-glitch::after  { background: var(--glitch-cyan); animation-direction: reverse }
 
 @keyframes fxChroma {
   0%, 100% { transform: translateX(0);    opacity: 0 }
@@ -1497,21 +1497,21 @@ kbd {
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
   padding: 0.75rem 0.9rem;
-  background: rgba(2, 10, 12, 0.94);
-  border: 1px solid var(--accent, #19d8d2);
+  background: var(--surface-diag);
+  border: 1px solid var(--accent);
   border-radius: 2px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-system-mono);
   font-size: 0.72rem;
   line-height: 1.6;
-  color: #cfe6e3;
+  color: var(--diag-fg);
   pointer-events: none;
   backdrop-filter: blur(6px);
 }
 
 .diag-head {
   letter-spacing: 0.18em;
-  color: var(--accent, #19d8d2);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--accent);
+  border-bottom: 1px solid var(--diag-rule);
   padding-bottom: 0.4rem;
   margin-bottom: 0.5rem;
 }
@@ -1527,8 +1527,8 @@ kbd {
 .diag-sec {
   margin: 0.7rem 0 0.3rem;
   letter-spacing: 0.16em;
-  color: #6d8886;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--diag-muted);
+  border-top: 1px solid var(--diag-rule-soft);
   padding-top: 0.45rem;
 }
 
@@ -1538,10 +1538,10 @@ kbd {
   gap: 0.5rem;
 }
 
-.diag-k { color: #6d8886; }
-.diag-v { color: #cfe6e3; overflow-wrap: anywhere; }
-.diag-ok { color: #3ef2a8; }
-.diag-bad { color: #ff6b6b; }
+.diag-k { color: var(--diag-muted); }
+.diag-v { color: var(--diag-fg); overflow-wrap: anywhere; }
+.diag-ok { color: var(--diag-ok); }
+.diag-bad { color: var(--diag-bad); }
 
 /* ------------------------------------------------------------------ blades */
 /*
@@ -1574,8 +1574,8 @@ kbd {
   padding: 0;
   background: linear-gradient(
     160deg,
-    color-mix(in srgb, var(--accent) 11%, rgba(4, 12, 18, 0.94)),
-    color-mix(in srgb, var(--accent) 4%, rgba(2, 8, 12, 0.96))
+    color-mix(in srgb, var(--accent) 11%, var(--surface-blade)),
+    color-mix(in srgb, var(--accent) 4%, var(--surface-blade-deep))
   );
   border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
   backdrop-filter: blur(14px);
@@ -1674,7 +1674,7 @@ kbd {
   /* contain, not cover: this is the thing being looked at, and cropping the
      subject out of a photograph to fill a rectangle is the wrong trade. */
   object-fit: contain;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-media-dim);
 }
 
 .bl-gallery {
@@ -1797,7 +1797,7 @@ kbd {
   letter-spacing: 0.18em;
   color: color-mix(in srgb, var(--accent) 90%, white);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, rgba(2, 8, 12, 0.8));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-live));
   backdrop-filter: blur(8px);
   pointer-events: none;
 }
@@ -1806,8 +1806,8 @@ kbd {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ff4d4d;
-  box-shadow: 0 0 8px #ff4d4d;
+  background: var(--camera-live);
+  box-shadow: 0 0 8px var(--camera-live);
   animation: handsPulse 1.6s ease-in-out infinite;
 }
 @keyframes handsPulse {
@@ -1825,7 +1825,7 @@ kbd {
   min-width: 210px;
   padding: 11px 13px 9px;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, rgba(2, 8, 12, 0.86));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-guide));
   backdrop-filter: blur(10px);
   pointer-events: none;
   text-transform: none;
@@ -1896,5 +1896,5 @@ kbd {
   height: 100%;
   object-fit: cover;
   transform: scaleX(-1);
-  background: #000;
+  background: var(--surface-media);
 }
