@@ -1,0 +1,28 @@
+<!-- @dsCard group="Sequences" height=240 subtitle="flash, scan, pulse, glitch (looped here)" -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap">
+<style>
+html,body{height:100%}body{margin:0;background:var(--bg)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:18px 24px;height:240px;box-sizing:border-box}
+.cell{position:relative;overflow:hidden;border:1px solid color-mix(in srgb,var(--accent) 22%,transparent)}
+.cell .lbl{position:absolute;left:10px;bottom:8px;font-size:8px;letter-spacing:.34em;text-transform:uppercase;opacity:.5;z-index:1}
+.fx{position:absolute}
+.fx-play,.fx-scan::before,.fx-wave,.fx-slice,.fx-glitch::before,.fx-glitch::after{animation-iteration-count:infinite!important;animation-duration:2.4s!important}
+.fx-wave{top:50%;width:60%;height:0;padding-top:60%;margin:-30% 0 0 -30%;left:50%}
+.core{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:radial-gradient(circle,var(--reactor-hot),var(--reactor-core) 45%,transparent 72%)}
+</style>
+</head>
+<body>
+<div class="hud" style="--accent: var(--interface);position:relative;inset:auto">
+  <div class="grid">
+    <div class="cell"><span class="core"></span><div class="fx"><div class="fx-play fx-flash"></div></div><span class="lbl">flash</span></div>
+    <div class="cell"><span class="core"></span><div class="fx"><div class="fx-play fx-scan"></div></div><span class="lbl">scan</span></div>
+    <div class="cell"><span class="core"></span><div class="fx"><div class="fx-play"><span class="fx-wave"></span><span class="fx-wave"></span></div></div><span class="lbl">pulse</span></div>
+    <div class="cell"><span class="core"></span><div class="fx"><div class="fx-play fx-glitch"><span class="fx-slice"></span><span class="fx-slice"></span><span class="fx-slice"></span></div></div><span class="lbl">glitch</span></div>
+  </div>
+</div>
+</body>
+</html>

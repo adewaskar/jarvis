@@ -1,0 +1,41 @@
+<!-- @dsCard group="Sequences" height=420 subtitle="the reticle (reconstructed from the stylesheet)" -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<style>html,body{height:100%}body{margin:0;background:var(--bg)}.instruments{transform:none}</style>
+</head>
+<body>
+<div class="instruments" style="--ins: var(--phase-listening); --spin: 36s; --spin-slow: 90s; --spin-fast: 18s">
+  <svg viewBox="-200 -200 400 400" id="ins"></svg>
+</div>
+<script>
+  const svg = document.getElementById('ins'), NS = 'http://www.w3.org/2000/svg';
+  const el = (n, a, p) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); (p || svg).appendChild(e); return e; };
+  const g = (cls, p) => el('g', { class: cls }, p);
+  const outer = g('ins-spin-cw-slow');
+  el('circle', { class: 'ins-ring', r: 186 }, outer);
+  for (let i = 0; i < 120; i++) {
+    const a = (i / 120) * Math.PI * 2, major = i % 10 === 0, r0 = major ? 172 : 178, r1 = 186;
+    el('path', { class: major ? 'ins-tick-major' : 'ins-tick', d: `M${Math.cos(a)*r0} ${Math.sin(a)*r0}L${Math.cos(a)*r1} ${Math.sin(a)*r1}` }, outer);
+  }
+  const mid = g('ins-spin-ccw');
+  el('circle', { class: 'ins-ring ins-ring-dashed', r: 150 }, mid);
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(a), s = Math.sin(a);
+    el('path', { class: 'ins-bar', d: `M${c*136} ${s*136}L${c*150} ${s*150}` }, mid);
+  }
+  const inner = g('ins-spin-cw');
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2, c = Math.cos(a), s = Math.sin(a), r = 112, w = 0.22;
+    const p0 = [Math.cos(a - w) * r, Math.sin(a - w) * r], p1 = [Math.cos(a + w) * r, Math.sin(a + w) * r];
+    el('path', { class: 'ins-bracket', d: `M${p0[0]} ${p0[1]}A${r} ${r} 0 0 1 ${p1[0]} ${p1[1]}` }, inner);
+    el('path', { class: 'ins-spoke', d: `M${c*96} ${s*96}L${c*104} ${s*104}` }, inner);
+  }
+  const hex = (r, cls) => el('path', { class: cls, d: [0,1,2,3,4,5].map(i => { const a = i * Math.PI / 3 + Math.PI / 6; return (i ? 'L' : 'M') + (Math.cos(a)*r).toFixed(1) + ' ' + (Math.sin(a)*r).toFixed(1); }).join('') + 'Z' });
+  hex(78, 'ins-hex'); hex(64, 'ins-hex ins-hex-inner');
+  const labels = [['PWR', 0, -164], ['SIG', 164, 0], ['DEP', 0, 164], ['MK', -164, 0]];
+  for (const [t, x, y] of labels) { const l = el('text', { class: 'ins-label', x, y }); l.textContent = t; }
+</script>
+</body>
+</html>

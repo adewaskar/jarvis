@@ -1,0 +1,55 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&display=swap">
+<style>
+html,body{margin:0;background:var(--bg)}
+.cover{position:relative;width:960px;height:288px;overflow:hidden;background:var(--bg)}
+.cover svg{position:absolute;left:0;top:0;display:block}
+.ink{fill:var(--interface)}
+.amber{fill:var(--phase-thinking)}
+.violet{fill:var(--phase-tooling)}
+.green{fill:var(--phase-speaking)}
+.deep{fill:var(--phase-offline)}
+.ground{fill:var(--bg)}
+.tick{stroke:var(--bg);stroke-width:1}
+.tick-major{stroke:var(--bg);stroke-width:1.4}
+.bracket{fill:none;stroke:var(--interface);stroke-width:1}
+.name{position:absolute;left:48px;top:150px;margin:0;font:600 64px/0.95 var(--font-display, 'Chakra Petch', system-ui, sans-serif);letter-spacing:0.42em;color:var(--ink-boot);text-transform:uppercase;white-space:nowrap}
+.tag{position:absolute;left:48px;top:230px;margin:0;font:400 14px/1.3 var(--font-display, 'Chakra Petch', system-ui, sans-serif);letter-spacing:0.22em;text-transform:uppercase;color:var(--interface);opacity:0.62;max-width:440px}
+</style>
+</head>
+<body>
+<div class="cover">
+<!--
+  blocks: interface 368×96, phase-thinking 184×96, phase-tooling 92×96, phase-speaking 184×96, phase-offline 132×96 — a top band 96 tall (6 × pad-panel-x 16), widths in multiples of inset-rail 92 and pad-panel-x 16
+  arrangement: one full-width strip of unequal bands across the top, flush, like the boot bar; the name beneath it (top-band skeleton — the name is wider than 440px at 64px)
+  pattern: a literal motif, the instrument reticle: tick marks cut out of the interface slab at a 16px pitch (pad-panel-x), a major tick every 92px (inset-rail), and four 46px corner brackets (corner-size) at the band's corners — chosen because this brand composes with instrument markings instead of boxes
+  scales: pitch 16, major 92, band 96, brackets 46 at inset 26 (inset-corner); radius-none everywhere, rx 0
+-->
+<svg width="960" height="288" viewBox="0 0 960 288" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <rect class="ink" x="0" y="0" width="368" height="96"/>
+  <rect class="amber" x="368" y="0" width="184" height="96"/>
+  <rect class="violet" x="552" y="0" width="92" height="96"/>
+  <rect class="green" x="644" y="0" width="184" height="96"/>
+  <rect class="deep" x="828" y="0" width="132" height="96"/>
+  <g>
+    <path class="tick" d="M16 82V96M32 82V96M48 82V96M64 82V96M80 82V96M112 82V96M128 82V96M144 82V96M160 82V96M176 82V96M208 82V96M224 82V96M240 82V96M256 82V96M272 82V96M304 82V96M320 82V96M336 82V96M352 82V96"/>
+    <path class="tick-major" d="M0 74V96M92 74V96M184 74V96M276 74V96M368 74V96"/>
+    <path class="tick" d="M384 82V96M400 82V96M416 82V96M432 82V96M448 82V96M480 82V96M496 82V96M512 82V96M528 82V96M544 82V96M560 82V96M576 82V96M592 82V96M608 82V96M624 82V96M660 82V96M676 82V96M692 82V96M708 82V96M724 82V96M740 82V96M756 82V96M772 82V96M788 82V96M804 82V96M844 82V96M860 82V96M876 82V96M892 82V96M908 82V96M924 82V96M940 82V96"/>
+    <path class="tick-major" d="M460 74V96M552 74V96M644 74V96M736 74V96M828 74V96M920 74V96"/>
+  </g>
+  <g>
+    <path class="bracket" d="M26 148V122H52"/>
+    <path class="bracket" d="M934 148V122H908"/>
+    <path class="bracket" d="M26 240V266H52"/>
+    <path class="bracket" d="M934 240V266H908"/>
+  </g>
+</svg>
+<h1 class="name">J.A.R.V.I.S.</h1>
+<p class="tag">Just A Rather Very Intelligent System</p>
+</div>
+</body>
+</html>

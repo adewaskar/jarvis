@@ -1,0 +1,22 @@
+<!-- @dsCard group="Overlays" height=300 subtitle="press D" -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap">
+<style>html,body{height:100%}body{margin:0;background:var(--bg)}.diag{position:absolute}</style>
+</head>
+<body style="--accent: var(--phase-listening)">
+<div class="diag">
+  <div class="diag-head">DIAGNOSTICS</div>
+  <div class="diag-verdict"><span class="diag-ok">OK: hearing you (level 0.62)</span><span class="diag-bad">FAIL: no wake-word engine</span></div>
+  <div class="diag-sec">AUDIO</div>
+  <div class="diag-row"><span class="diag-k">input</span><span class="diag-v">MacBook Pro Microphone</span></div>
+  <div class="diag-row"><span class="diag-k">sample rate</span><span class="diag-v">48000</span></div>
+  <div class="diag-row"><span class="diag-k">vad</span><span class="diag-v diag-ok">speaking</span></div>
+  <div class="diag-sec">BRIDGE</div>
+  <div class="diag-row"><span class="diag-k">socket</span><span class="diag-v">ws://localhost:8787 · open</span></div>
+  <div class="diag-row"><span class="diag-k">writes</span><span class="diag-v diag-bad">disabled</span></div>
+</div>
+</body>
+</html>

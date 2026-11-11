@@ -1,0 +1,1918 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap');
+
+:root {
+  /* --interface, --accent and --bg come from tokens.css (the design-system tokens). */
+  font-family: var(--font-display, "Chakra Petch", system-ui, sans-serif);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  background: var(--bg);
+  /* The app also sets height: 100% and overflow: hidden here; previews need to grow. */
+}
+
+/* Faint scanlines + radial falloff so the 3D never sits on flat black. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background:
+    radial-gradient(ellipse at center, transparent 30%, var(--vignette) 100%),
+    repeating-linear-gradient(
+      0deg,
+      var(--scanline) 0px,
+      var(--scanline) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+}
+
+.scene {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+/* --------------------------------------------------------------------- HUD */
+
+.hud {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  color: var(--accent);
+  transition: color 600ms ease;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+}
+
+.corner {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 0.8;
+}
+.corner-tl { top: 26px; left: 26px; border-right: 0; border-bottom: 0; }
+.corner-tr { top: 26px; right: 26px; border-left: 0; border-bottom: 0; }
+.corner-bl { bottom: 26px; left: 26px; border-right: 0; border-top: 0; }
+.corner-br { bottom: 26px; right: 26px; border-left: 0; border-top: 0; }
+
+.hud-top {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0 92px;
+}
+
+.brand-mark {
+  display: block;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.brand-sub {
+  display: block;
+  margin-top: 5px;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  opacity: 0.42;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  /* The header is space-between, so with the wordmark hidden the status line
+     would slide to the left edge on its own. Claiming the free space keeps it
+     pinned right whether or not the brand is there — and with both present it
+     changes nothing, since space-between had already used that space up. */
+  margin-left: auto;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+
+/* Side rails */
+
+.rail {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 10px;
+}
+.rail-left { left: 92px; }
+.rail-right { right: 92px; align-items: flex-end; }
+
+.rail-title {
+  font-size: 8px;
+  opacity: 0.4;
+  letter-spacing: 0.34em;
+  margin-bottom: 4px;
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.82;
+}
+.rail-item.dim { opacity: 0.3; }
+.rail-item.mono { font-family: var(--font-mono); letter-spacing: 0.1em; }
+
+.tick {
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  transform: rotate(45deg);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.meter {
+  width: 3px;
+  height: 96px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  display: flex;
+  align-items: flex-end;
+  margin: 4px 0;
+}
+
+.meter-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  transform-origin: bottom;
+  transition: transform 90ms linear;
+}
+
+/* Tool badge */
+
+/* The tool readout. This is the moment the interface proves it did something
+   real, so it's set as a headline under the reactor rather than a chip on top
+   of it — no box, no backdrop, just light. */
+.tool-badge {
+  position: absolute;
+  /* Pinned near the top, in its own band with the rest of the status chrome.
+     The centring (x: -50%) is a framer motion prop in Hud.tsx, not here —
+     framer writes `transform` inline on an animated element and would overwrite
+     anything declared in CSS. */
+  top: 74px;
+  left: 50%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+  padding: 7px 16px 7px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-chip));
+  backdrop-filter: blur(5px);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 22%, transparent);
+  /* Above the panels and the log so a long tool name reads cleanly, but it is a
+     thin chip that never enters the transcript's space to begin with. */
+  z-index: 6;
+}
+
+.tool-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 8px;
+  letter-spacing: 0.36em;
+  text-indent: 0.36em;
+  opacity: 0.6;
+  padding-right: 12px;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.tool-name {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  /* Bounded so a long name truncates rather than stretching the chip off-frame. */
+  max-width: min(52vw, 620px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-tool);
+  text-shadow: 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+@media (max-width: 1100px) {
+  .tool-name { font-size: 12px; letter-spacing: 0.18em; max-width: 60vw; }
+  .tool-badge { top: 60px; }
+}
+
+.spinner {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Conversation log */
+
+.log {
+  position: absolute;
+  left: 50%;
+  bottom: 132px;
+  transform: translateX(-50%);
+  width: min(760px, 68vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.log-line {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.log-who {
+  flex: 0 0 54px;
+  font-size: 8px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  opacity: 0.45;
+  padding-top: 3px;
+}
+
+.log-user .log-text { opacity: 0.52; }
+.log-jarvis .log-text {
+  color: var(--ink-reply);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Live partial transcript while listening */
+
+.caption {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  font-size: 16px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--ink-caption);
+  opacity: 0.85;
+  max-width: 66vw;
+  text-align: center;
+}
+
+.error {
+  position: absolute;
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  color: var(--error);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  max-width: 70vw;
+  text-align: center;
+}
+
+.hud-bottom {
+  position: absolute;
+  bottom: 44px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9px;
+  opacity: 0.38;
+  letter-spacing: 0.2em;
+}
+
+kbd {
+  font-family: var(--font-mono);
+  border: 1px solid currentColor;
+  padding: 1px 5px;
+  font-size: 9px;
+}
+
+/* ----------------------------------------------------------------- panels */
+
+/* Centring is done with flex rather than `transform: translate(-50%)`.
+   Framer Motion's layout projection cannot measure through a transformed
+   ancestor — it re-measures every frame and fights the CSS, which shows up as
+   a hard flicker on any panel that animates. */
+.panels {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.panels-right {
+  top: 0;
+  bottom: 0;
+  right: 150px;
+  width: 320px;
+  align-items: flex-end;
+}
+
+/* Clear of the SYSTEMS rail, which sits at left:92px and runs ~150px wide. */
+.panels-left {
+  top: 0;
+  bottom: 0;
+  left: 272px;
+  width: 280px;
+  align-items: flex-start;
+}
+
+/* Under the reactor, for images and anything that needs the width. */
+.panels-wide {
+  left: 0;
+  right: 0;
+  bottom: 132px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.panels-wide > * { width: min(620px, 60vw); }
+
+/* Accent identity. The panel re-declares --accent, so every .hud-* class inside
+   picks up the new colour without the model touching a hex value.
+
+   `default` needs a rule of its own even though it just restates the interface
+   cyan. Without one it inherits the live --accent from `.hud` and re-tints
+   itself amber, then violet, then green as the phase moves underneath it —
+   while every explicitly accented panel holds still. A panel is a record of a
+   moment; it should stop changing colour once it has landed. */
+.panel-default { --accent: var(--interface); }
+.panel-amber  { --accent: var(--panel-amber); }
+.panel-violet { --accent: var(--panel-violet); }
+.panel-green  { --accent: var(--panel-green); }
+.panel-red    { --accent: var(--panel-red); }
+
+.panel {
+  position: relative;
+  width: 100%;
+  /* Bounded so a stray image or a run of markup can't balloon into a
+     screen-height rectangle. */
+  max-height: 46vh;
+  overflow: hidden;
+  padding: 14px 16px;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent) 9%, transparent),
+    color-mix(in srgb, var(--accent) 3%, transparent)
+  );
+  backdrop-filter: blur(7px);
+  transform-origin: top center;
+  overflow: hidden;
+}
+
+/* Bracket corners rather than a full border — instrument markings, not boxes. */
+.pk {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--accent);
+  opacity: 0.85;
+}
+.pk-tl { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+.pk-tr { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+.pk-bl { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+.pk-br { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+
+/* The scan wipe — a thin bright band travelling down the card once as it
+   lands. An earlier version filled the whole panel and washed the content out;
+   the point is a scan line passing over, not a flash. */
+.p-wipe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 34%;
+  transform-origin: top;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, var(--accent) 12%, transparent) 70%,
+    color-mix(in srgb, var(--accent) 55%, transparent) 100%
+  );
+  pointer-events: none;
+}
+
+.p-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.p-title {
+  font-size: 8px;
+  letter-spacing: 0.3em;
+  opacity: 0.62;
+}
+
+/* The design system JARVIS composes with. These class names live in three
+   places and all three have to agree: here, in ALLOWED_CLASSES in
+   src/ui/Panels.tsx — anything absent from that set is stripped before it
+   reaches the DOM — and in the `display` tool description in
+   bridge/panels.mjs, which is how the model learns they exist. */
+
+.p-body {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Applied when the model asks for `stagger` — items land in sequence.
+   Indexed rather than scripted, so it works on whatever markup it authored.
+
+   An item is a direct child of the body, unless that child is one of the list
+   containers — then the rows inside it are the items and the container itself
+   sits still. This used to match grandchildren only, which is right for
+   `.hud-rows > .hud-row` and wrong for every other shape the design system
+   produces: a `<p class="hud-note">` body animated its inner span and nothing
+   else, and a flat row animated each of its columns separately. */
+.p-stagger > *,
+.p-stagger > :is(.hud-rows, .hud-grid, .hud-gallery) > * {
+  animation: rowIn 0.34s both;
+  animation-delay: var(--stagger-d, 0.05s);
+}
+
+/* A list container is scenery; its rows do the arriving. */
+.p-stagger > :is(.hud-rows, .hud-grid, .hud-gallery) { animation: none; }
+
+/* Delays are set on everything inside and only read by the rule above, so one
+   ladder covers both shapes. Anything past the last step shares it rather than
+   landing instantly — with six declared, a seventh row appeared fully formed
+   before the first one had moved. */
+.p-stagger *:nth-child(1) { --stagger-d: 0.05s; }
+.p-stagger *:nth-child(2) { --stagger-d: 0.11s; }
+.p-stagger *:nth-child(3) { --stagger-d: 0.17s; }
+.p-stagger *:nth-child(4) { --stagger-d: 0.23s; }
+.p-stagger *:nth-child(5) { --stagger-d: 0.29s; }
+.p-stagger *:nth-child(6) { --stagger-d: 0.35s; }
+.p-stagger *:nth-child(7) { --stagger-d: 0.41s; }
+.p-stagger *:nth-child(8) { --stagger-d: 0.47s; }
+.p-stagger *:nth-child(9) { --stagger-d: 0.53s; }
+.p-stagger *:nth-child(10) { --stagger-d: 0.59s; }
+.p-stagger *:nth-child(n + 11) { --stagger-d: 0.65s; }
+
+@keyframes rowIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* rows -------------------------------------------------------------------- */
+
+.hud-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.hud-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.hud-idx {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  opacity: 0.45;
+  padding-top: 2px;
+}
+
+.hud-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hud-label {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ink-label);
+  /* Two lines then clip — a HUD row, not a paragraph. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hud-sub {
+  font-size: 10.5px;
+  line-height: 1.35;
+  opacity: 0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-tag {
+  flex: 0 0 auto;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.42;
+  padding-top: 3px;
+}
+
+/* media ------------------------------------------------------------------- */
+
+.hud-img {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  /* Pull photographs slightly toward the interface palette so they don't
+     fight the surrounding cyan. */
+  filter: saturate(0.85) contrast(1.05);
+}
+
+.hud-caption {
+  display: block;
+  margin-top: 8px;
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+/* Web media -----------------------------------------------------------------
+
+   Everything below shows something JARVIS found rather than something he made:
+   image-search thumbnails, a clip, a YouTube result. It is loaded through the
+   bridge proxy (see rewriteMedia in src/ui/Panels.tsx), so as far as the page
+   is concerned it all comes from localhost.
+
+   Two constraints shape the lot of it. The panel is a fixed column with
+   `overflow: hidden`, so anything in here has to be width-driven and never
+   wider than its container — a stray intrinsic width on an image or an iframe
+   would be clipped rather than scrolled, and would take the layout with it. And
+   `.panels` is `pointer-events: none` so the HUD never eats a click, which
+   means anything the user is actually meant to operate has to opt back in. */
+
+.hud-gallery {
+  display: grid;
+  /* auto-fill rather than a fixed count: the same markup has to work in the
+     280px left column and the 620px wide slot under the reactor. */
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  /* A grid item's default `min-width: auto` is its content's intrinsic width,
+     which is how a 1200px-wide photograph pushes a track past 1fr and blows the
+     row out sideways. */
+  min-width: 0;
+}
+
+.hud-gallery > * {
+  min-width: 0;
+}
+
+.hud-thumb {
+  display: block;
+  width: 100%;
+  /* Fixed ratio so a gallery of mixed portrait and landscape results reads as a
+     grid of tiles rather than a ragged mosaic. */
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  /* Matches .hud-img — pulls photographs toward the interface palette so they
+     don't fight the surrounding cyan. */
+  filter: saturate(0.85) contrast(1.05);
+}
+
+/* A thumbnail leading a row is a tile beside the text, not the row's content —
+   without a basis of its own, `width: 100%` on a flex item makes it fight the
+   label for the whole row. */
+.hud-row > .hud-thumb {
+  flex: 0 0 56px;
+  width: 56px;
+  align-self: center;
+}
+
+.hud-video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  max-height: 300px;
+  background: var(--surface-media);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  /* Controls are the whole point of a player. */
+  pointer-events: auto;
+}
+
+/* A 16:9 box for an embed. Written for both shapes the model will produce: the
+   class on a wrapper around the iframe, and the class on the iframe itself. */
+.hud-embed {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--surface-media);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+/* The wrapper case. An iframe carrying the class itself is already the box —
+   this is a descendant selector, so it doesn't match one. */
+.hud-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* Media and its caption as one unit, so the caption can't drift onto the next
+   item when several sit in a row. */
+.hud-figure {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 0;
+  min-width: 0;
+}
+
+.hud-figure > .hud-caption {
+  margin-top: 6px;
+}
+
+.hud-figure > img,
+.hud-figure > video {
+  max-width: 100%;
+}
+
+/* figures ----------------------------------------------------------------- */
+
+.hud-metric {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 40px;
+  line-height: 1;
+  color: var(--ink-metric);
+  text-shadow: 0 0 30px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+.hud-unit {
+  display: block;
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.hud-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  opacity: 0.8;
+  color: var(--ink-note);
+}
+
+.hud-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+
+/* Progress bar — width comes from a --v custom property, the one inline style
+   allowed through the sanitiser. */
+.hud-bar {
+  position: relative;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  overflow: hidden;
+}
+.hud-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--v, 0) * 100%);
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+/* Shown instead of a blank rectangle when a panel arrives with nothing in it. */
+.p-empty {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  opacity: 0.35;
+}
+
+.hud-dim { opacity: 0.45; }
+.hud-hot {
+  color: var(--accent);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+@media (max-width: 1400px) {
+  .panels-right { right: 40px; width: 290px; }
+  /* Below this width there isn't room for the rail and a left panel side by
+     side, so the panel takes the space and the rail sits under it. */
+  .panels-left { left: 40px; width: 260px; top: 32%; }
+}
+
+/* ------------------------------------------------------------ suggestions */
+
+.suggest {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  white-space: nowrap;
+}
+
+.suggest-lead {
+  font-size: 8px;
+  letter-spacing: 0.34em;
+  opacity: 0.3;
+}
+
+.suggest-text {
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  opacity: 0.45;
+}
+
+/* --------------------------------------------------------------- ignition */
+
+.ignition {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse at center, var(--ignition-core) 0%, var(--bg) 70%);
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ignition-ink);
+}
+
+.ignition-ring {
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  border: 1px solid color-mix(in srgb, var(--ignition-ink) 28%, transparent);
+  border-top-color: color-mix(in srgb, var(--ignition-ink) 90%, transparent);
+  border-radius: 50%;
+}
+
+.ignition-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.ignition-word {
+  font-size: 15px;
+  letter-spacing: 0.52em;
+  text-indent: 0.52em; /* balance the trailing letter-space */
+  text-shadow: 0 0 30px color-mix(in srgb, var(--ignition-ink) 70%, transparent);
+}
+
+.ignition-sub {
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  opacity: 0.4;
+  text-transform: uppercase;
+}
+
+.ignition:hover .ignition-word {
+  text-shadow: 0 0 44px var(--ignition-ink);
+}
+
+/* ------------------------------------------------------------------- boot */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  background: var(--bg);
+  color: var(--accent);
+  overflow: hidden;
+}
+
+/* -- beat 1: the status bar -------------------------------------------- */
+
+.boot-bar {
+  position: absolute;
+  top: 12%;
+  left: 0;
+  right: 0;
+  padding: 0 min(9vw, 140px);
+  transition: opacity 0.6s ease, filter 0.6s ease;
+}
+.boot-bar-dim { opacity: 0.28; filter: blur(0.6px); }
+
+.boot-bar-frame {
+  position: relative;
+  border-top: 1.5px solid var(--accent);
+  border-bottom: 1.5px solid var(--accent);
+  padding: 14px 26px 12px;
+  clip-path: polygon(3% 0, 97% 0, 100% 42%, 97% 100%, 3% 100%, 0 42%);
+  box-shadow:
+    inset 0 0 40px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 0 30px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.boot-bar-title {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: clamp(18px, 3.4vw, 40px);
+  font-weight: 300;
+  letter-spacing: 0.14em;
+  color: var(--ink-boot);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.boot-dots { opacity: 0.6; margin: 0 0.2em; }
+.boot-cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.05em;
+  margin-left: 0.15em;
+  background: var(--accent);
+  animation: bootBlink 0.7s steps(1) infinite;
+}
+@keyframes bootBlink { 50% { opacity: 0 } }
+
+.boot-seg { display: flex; gap: 3px; margin-top: 12px; }
+.boot-seg-cell {
+  flex: 1;
+  height: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.boot-seg-cell[data-on='1'] {
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.boot-log {
+  margin-top: 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.9;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+.boot-log-line { animation: bootLogIn 0.25s ease both; }
+.boot-log-line::before { content: '\203a  '; opacity: 0.5; }
+@keyframes bootLogIn { from { opacity: 0; transform: translateX(-8px) } }
+
+/* -- beats 2-4: the centre stage --------------------------------------- */
+
+.boot-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.boot-rings,
+.boot-suit,
+.boot-reactor {
+  width: min(58vmin, 520px);
+  height: min(58vmin, 520px);
+  overflow: visible;
+}
+
+.boot-ring {
+  fill: none;
+  stroke: var(--accent);
+  opacity: 0.8;
+  transform-box: fill-box;
+  transform-origin: center;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 50%, transparent));
+}
+.boot-name {
+  fill: var(--ink-boot);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.boot-wire {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+.boot-wire-dim { opacity: 0.4; stroke-width: 1; }
+.boot-suit-fig { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 40%, transparent)); }
+.boot-tag {
+  fill: var(--accent);
+  opacity: 0.55;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-anchor: middle;
+}
+
+.boot-r-seg {
+  stroke: color-mix(in srgb, var(--accent) 30%, transparent);
+  stroke-width: 8;
+}
+.boot-r-on { stroke: var(--ink-reactor-lit); filter: drop-shadow(0 0 8px var(--accent)); }
+.boot-r-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: calc(0.3 + var(--glow) * 0.6);
+}
+.boot-r-ring-in { stroke-width: 1.5; opacity: calc(0.2 + var(--glow) * 0.5); }
+.boot-r-tri {
+  fill: color-mix(in srgb, var(--accent) calc(var(--glow) * 45%), transparent);
+  stroke: var(--ink-boot);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 calc(var(--glow) * 26px) var(--accent));
+}
+.boot-r-tri-in {
+  fill: color-mix(in srgb, var(--ink-boot) calc(var(--glow) * 60%), transparent);
+  stroke: none;
+}
+.boot-r-v {
+  fill: none;
+  stroke: var(--reactor-vector);
+  stroke-width: 3.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: var(--glow);
+}
+
+@media (max-width: 900px) {
+  .hud-top { padding: 0 46px; }
+  .rail-left { left: 30px; }
+  .rail-right { right: 30px; }
+  .log { width: 84vw; }
+}
+
+/* ---------------------------------------------------------------------------
+   Instrument layer
+
+   The graduated rings, gauges and reticles that make the reactor read as a
+   cockpit instrument rather than a glowing ball. Sits above the 3D scene
+   (z 1) and below the HUD chrome (z 4), so text and panels always win.
+
+   Everything animates with transform only, on its own compositor layer, and
+   nothing in here re-renders between phase changes.
+   --------------------------------------------------------------------------- */
+
+.instruments {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  /* The reactor sits slightly above centre, matching the 3D camera. */
+  transform: translateY(-2vh);
+}
+
+.instruments svg {
+  /* Tied to the smaller axis so the assembly stays circular and never crops. */
+  width: min(82vmin, 820px);
+  height: min(82vmin, 820px);
+  overflow: visible;
+}
+
+.instruments path,
+.instruments text {
+  transition: stroke 600ms ease, fill 600ms ease;
+}
+
+/* -- strokes -------------------------------------------------------------- */
+
+.ins-tick {
+  stroke: var(--ins);
+  stroke-width: 1;
+  opacity: 0.55;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-tick-major {
+  stroke: var(--ins);
+  stroke-width: 1.4;
+  opacity: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-bar {
+  stroke: var(--ins);
+  stroke-width: 2.2;
+  opacity: 0.75;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-ring {
+  fill: none;
+  stroke: var(--ins);
+  stroke-width: 1;
+  opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-ring-dashed {
+  stroke-dasharray: 46 12 4 12;
+  opacity: 0.8;
+}
+
+.ins-bracket {
+  fill: none;
+  stroke: var(--ins);
+  stroke-width: 1.6;
+  opacity: 0.85;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-spoke {
+  stroke: var(--ins);
+  stroke-width: 1;
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-hex {
+  fill: none;
+  stroke: var(--ins);
+  stroke-width: 1.2;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-hex-inner {
+  opacity: 0.45;
+}
+
+.ins-label {
+  fill: var(--ins);
+  opacity: 0.75;
+  font: 400 13px/1 var(--font-system-mono);
+  letter-spacing: 0.18em;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+/* -- rotation ------------------------------------------------------------- */
+
+@keyframes ins-cw  { to { transform: rotate(360deg) } }
+@keyframes ins-ccw { to { transform: rotate(-360deg) } }
+
+.ins-spin-cw,
+.ins-spin-cw-slow,
+.ins-spin-ccw,
+.ins-spin-ccw-fast {
+  transform-origin: 0 0;   /* the viewBox is centred on the origin */
+  transform-box: view-box;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  /* Phase changes retime the animation; easing the duration is not possible in
+     CSS, so the transition on stroke carries the change and the speed simply
+     steps. At these tempos the step is not readable as a jump. */
+  transition: none;
+}
+
+.ins-spin-cw        { animation-name: ins-cw;  animation-duration: var(--spin) }
+.ins-spin-cw-slow   { animation-name: ins-cw;  animation-duration: var(--spin-slow) }
+.ins-spin-ccw       { animation-name: ins-ccw; animation-duration: var(--spin) }
+.ins-spin-ccw-fast  { animation-name: ins-ccw; animation-duration: var(--spin-fast) }
+
+@media (prefers-reduced-motion: reduce) {
+  .ins-spin-cw,
+  .ins-spin-cw-slow,
+  .ins-spin-ccw,
+  .ins-spin-ccw-fast { animation: none }
+}
+
+/* ---------------------------------------------------------------------------
+   Decoding text
+
+   JARVIS's half of the transcript resolves out of noise instead of simply
+   appearing. Two spans do the work: the ghost is the live scramble, the veil
+   is the text that has not been reached yet — present in the DOM, and so in
+   the accessibility tree and in the line wrapping, but not painted. Reserving
+   that space is what stops the paragraph reflowing under the reader as the
+   answer streams in.
+   --------------------------------------------------------------------------- */
+
+.decode-ghost {
+  /* Monospace on purpose: the noise should read as a readout rather than as a
+     word that has been mistyped. */
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  color: var(--accent);
+  opacity: 0.62;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.decode-veil {
+  opacity: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Blades — the tool-execution sweep
+
+   Thin shards raking across the frame at a tilt while a tool runs. Everything
+   here is transform and opacity so the whole sweep stays on the compositor and
+   never touches layout, which matters because it plays over a live 3D scene.
+
+   The band is inset from the top and bottom of the frame rather than filling
+   it: the header and the transcript both have to stay legible through this,
+   and a blade crossing a line of text is noise in the literal sense.
+   --------------------------------------------------------------------------- */
+
+.blades {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 14%;
+  /* Stops well short of the transcript. A four-line log at the bottom of a
+     short viewport reaches roughly 28% up the frame, and a blade crossing a
+     line of text is noise in the literal sense. */
+  bottom: 30%;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  /* Faded at both ends so the sweep reads as light passing through the middle
+     of the frame, and so it never arrives underneath the side rails or the
+     panel columns at full strength. */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+
+/* A second element for the vertical fade. Two masks on one box needs
+   mask-composite, which is still uneven across engines; nesting is boring and
+   works everywhere. */
+.blade-field {
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(transparent, #000 20%, #000 80%, transparent);
+  mask-image: linear-gradient(transparent, #000 20%, #000 80%, transparent);
+}
+
+.blade {
+  position: absolute;
+  left: 0;
+  top: -14%;
+  height: 128%;
+  width: var(--blade-w);
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--accent) 70%, #fff) 46%,
+    var(--accent) 58%,
+    transparent
+  );
+  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: bladeSweep var(--blade-t) cubic-bezier(0.45, 0, 0.25, 1) var(--blade-d) infinite;
+}
+
+@keyframes bladeSweep {
+  0%   { transform: translateX(-18vw) skewX(var(--blade-k)) scaleY(0.55); opacity: 0 }
+  14%  { opacity: var(--blade-o) }
+  70%  { opacity: var(--blade-o) }
+  100% { transform: translateX(116vw) skewX(var(--blade-k)) scaleY(1); opacity: 0 }
+}
+
+/* Six slivers, all different. Machinery engaging is not a metronome — the
+   widths, tilts and tempos are deliberately co-prime-ish so the pattern never
+   visibly repeats over the few seconds a tool call lasts. The wide, dim ones
+   are the glow the sharp ones travel in. */
+.blade-1 { --blade-w: 2px;  --blade-k: -20deg; --blade-t: 1.55s; --blade-d: 0s;    --blade-o: 0.85; --blade-x: 22vw }
+.blade-2 { --blade-w: 7px;  --blade-k: -20deg; --blade-t: 2.1s;  --blade-d: 0.18s; --blade-o: 0.26; --blade-x: 27vw }
+.blade-3 { --blade-w: 1px;  --blade-k: -13deg; --blade-t: 1.15s; --blade-d: 0.42s; --blade-o: 0.7;  --blade-x: 44vw }
+.blade-4 { --blade-w: 16px; --blade-k: -27deg; --blade-t: 2.6s;  --blade-d: 0.6s;  --blade-o: 0.14; --blade-x: 58vw }
+.blade-5 { --blade-w: 2px;  --blade-k: -27deg; --blade-t: 1.85s; --blade-d: 0.9s;  --blade-o: 0.6;  --blade-x: 63vw }
+.blade-6 { --blade-w: 3px;  --blade-k: -8deg;  --blade-t: 1.35s; --blade-d: 1.25s; --blade-o: 0.5;  --blade-x: 78vw }
+
+/* The name of the tool rides in with the sweep, then holds nearly still long
+   enough to be read, then leaves with it. Sits near the top of the band so it
+   never collides with the headline readout under the reactor. */
+.blade-carrier {
+  position: absolute;
+  left: 50%;
+  top: 4%;
+}
+
+.blade-tool {
+  display: block;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-blade);
+  text-shadow:
+    0 0 18px var(--accent),
+    0 0 44px color-mix(in srgb, var(--accent) 55%, transparent);
+  will-change: transform, opacity;
+  animation: bladeCarry 3.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.blade-tool::before {
+  content: '⟩ ';
+  opacity: 0.5;
+}
+
+@keyframes bladeCarry {
+  0%   { transform: translateX(-150%) skewX(-18deg); opacity: 0 }
+  18%  { transform: translateX(-58%)  skewX(-4deg);  opacity: 0.92 }
+  72%  { transform: translateX(-42%)  skewX(4deg);   opacity: 0.92 }
+  100% { transform: translateX(45%)   skewX(18deg);  opacity: 0 }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No sweep. The blades still say "something is running", they just say it as
+     a still frame — parked where each one would have crossed. */
+  .blade {
+    animation: none;
+    opacity: calc(var(--blade-o) * 0.55);
+    transform: translateX(var(--blade-x)) skewX(var(--blade-k));
+  }
+  .blade-tool {
+    animation: none;
+    transform: translateX(-50%);
+    opacity: 0.9;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   One-shot frame effects
+
+   Mounted only while playing (see Effects.tsx), so none of this costs anything
+   at rest. Everything is pointer-events: none — the ignition button and the
+   boot screen sit above the HUD entirely, so nothing here can trap a click.
+   --------------------------------------------------------------------------- */
+
+.fx {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.fx-play {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* flash ------------------------------------------------------------------- */
+
+.fx-flash {
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--accent) 55%, transparent),
+    transparent 72%
+  );
+  animation: fxFlash 480ms ease-out both;
+}
+
+@keyframes fxFlash {
+  0%   { opacity: 0 }
+  12%  { opacity: 1 }
+  100% { opacity: 0 }
+}
+
+/* scan -------------------------------------------------------------------- */
+
+.fx-scan::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 16vh;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--accent) 26%, transparent) 55%,
+    color-mix(in srgb, var(--accent) 80%, #fff) 92%,
+    transparent
+  );
+  animation: fxScan 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes fxScan {
+  from { transform: translateY(-20vh) }
+  to   { transform: translateY(120vh) }
+}
+
+/* pulse ------------------------------------------------------------------- */
+
+/* Centred on the reactor rather than on the viewport — the camera puts it
+   slightly above the middle, and a shockwave that misses its source by 2vh
+   reads as a bug rather than as an effect. */
+.fx-wave {
+  position: absolute;
+  top: calc(50% - 2vh);
+  left: 50%;
+  width: 40vmin;
+  height: 40vmin;
+  margin: -20vmin 0 0 -20vmin;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow:
+    0 0 44px color-mix(in srgb, var(--accent) 60%, transparent),
+    inset 0 0 44px color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: fxWave 900ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.fx-wave:nth-child(2) { animation-delay: 150ms }
+
+@keyframes fxWave {
+  from { transform: scale(0.22); opacity: 0.95 }
+  to   { transform: scale(3.4);  opacity: 0 }
+}
+
+/* glitch ------------------------------------------------------------------ */
+
+/* Slices displace what is *behind* them rather than painting over it —
+   backdrop-filter samples the live scene, so the tear happens to the reactor
+   itself. Stepped timing, because a glitch that eases is a wipe. */
+.fx-slice {
+  position: absolute;
+  left: -8%;
+  width: 116%;
+  opacity: 0;
+  -webkit-backdrop-filter: hue-rotate(90deg) saturate(1.9) contrast(1.08);
+  backdrop-filter: hue-rotate(90deg) saturate(1.9) contrast(1.08);
+  animation: fxTear 620ms steps(1, end) both;
+}
+
+.fx-glitch .fx-slice:nth-child(1) { top: 21%; height: 7%; animation-delay: 0ms }
+.fx-glitch .fx-slice:nth-child(2) { top: 45%; height: 4%; animation-delay: 90ms }
+.fx-glitch .fx-slice:nth-child(3) { top: 67%; height: 9%; animation-delay: 40ms }
+
+@keyframes fxTear {
+  0%, 100% { transform: translateX(0);      opacity: 0 }
+  10%      { transform: translateX(-3.5%);  opacity: 1 }
+  30%      { transform: translateX(2.6%);   opacity: 1 }
+  55%      { transform: translateX(-1.4%);  opacity: 1 }
+  80%      { transform: translateX(0.8%);   opacity: 1 }
+}
+
+/* The chromatic half of the tear: two full-frame casts pulling apart. */
+.fx-glitch::before,
+.fx-glitch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: fxChroma 620ms steps(2, end) both;
+}
+
+.fx-glitch::before { background: var(--glitch-magenta) }
+.fx-glitch::after  { background: var(--glitch-cyan); animation-direction: reverse }
+
+@keyframes fxChroma {
+  0%, 100% { transform: translateX(0);    opacity: 0 }
+  20%      { transform: translateX(-7px); opacity: 1 }
+  60%      { transform: translateX(6px);  opacity: 0.8 }
+}
+
+/* shake ------------------------------------------------------------------- */
+
+/* Applied to the HUD root by Effects.tsx for the duration, so the chrome takes
+   the hit as one body — the 3D scene is a separate layer and keeps still,
+   which is what sells it as the instruments being knocked rather than the
+   world moving. */
+.hud.fx-shaking {
+  animation: fxShake 520ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes fxShake {
+  0%, 100% { transform: translate(0, 0) }
+  12%      { transform: translate(-11px, 5px) }
+  26%      { transform: translate(9px, -6px) }
+  42%      { transform: translate(-7px, -3px) }
+  58%      { transform: translate(6px, 4px) }
+  74%      { transform: translate(-3px, 2px) }
+  88%      { transform: translate(2px, -1px) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Displacement is the part that hurts, so it goes; the effects still fire,
+     as a plain fade of the same colour in the same place. */
+  .hud.fx-shaking { animation: none }
+  .fx-slice,
+  .fx-wave,
+  .fx-scan::before,
+  .fx-glitch::before,
+  .fx-glitch::after {
+    animation-name: fxFade;
+    animation-timing-function: ease-out;
+  }
+}
+
+@keyframes fxFade {
+  0%   { opacity: 0 }
+  25%  { opacity: 0.7 }
+  100% { opacity: 0 }
+}
+
+/* ---------------------------------------------------------------------------
+   Diagnostics overlay (press D)
+
+   Deliberately plain and deliberately ugly: it is an instrument, not part of
+   the interface, and it should never be mistaken for one on camera.
+   --------------------------------------------------------------------------- */
+
+.diag {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 20;
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface-diag);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  font-family: var(--font-system-mono);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--diag-fg);
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+.diag-head {
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  border-bottom: 1px solid var(--diag-rule);
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.diag-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.diag-sec {
+  margin: 0.7rem 0 0.3rem;
+  letter-spacing: 0.16em;
+  color: var(--diag-muted);
+  border-top: 1px solid var(--diag-rule-soft);
+  padding-top: 0.45rem;
+}
+
+.diag-row {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: 0.5rem;
+}
+
+.diag-k { color: var(--diag-muted); }
+.diag-v { color: var(--diag-fg); overflow-wrap: anywhere; }
+.diag-ok { color: var(--diag-ok); }
+.diag-bad { color: var(--diag-bad); }
+
+/* ------------------------------------------------------------------ blades */
+/*
+   The blade stack — the surface for things meant to be looked at rather than
+   glanced at. Panels live down the sides in a fixed narrow column; blades take
+   the middle of the frame, because the whole point of them is that an article
+   needs a readable measure and a picture needs room.
+
+   The stack is centred rather than railed to one side. That does cover the
+   reactor, and it should: when there is something on screen worth reading, the
+   reactor is no longer the subject.
+*/
+.blades-stack {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  /* The container never eats clicks; only the cards inside it do, so the
+     reactor and the rails stay reachable around a small blade. */
+  pointer-events: none;
+}
+
+.bl {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent) 11%, var(--surface-blade)),
+    color-mix(in srgb, var(--accent) 4%, var(--surface-blade-deep))
+  );
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.62),
+    0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent) inset;
+  transform-origin: center center;
+}
+
+/* Only the front blade gets the accent glow; the ones behind read as paper. */
+.bl-front {
+  box-shadow:
+    0 26px 80px rgba(0, 0, 0, 0.7),
+    0 0 34px -10px color-mix(in srgb, var(--accent) 46%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent) inset;
+}
+
+/* Sizes are about how the content is meant to be consumed.
+   `tall` is a reading measure — roughly 60 characters at the body size in
+   page.mjs, which is the width prose is actually legible at. */
+.bl-compact { width: min(90vw, 440px);  height: min(58vh, 380px) }
+.bl-tall    { width: min(92vw, 560px);  height: min(82vh, 900px) }
+.bl-wide    { width: min(88vw, 1080px); height: min(72vh, 720px) }
+.bl-full    { width: 92vw;              height: 88vh }
+.bl-expanded { width: 94vw; height: 92vh }
+
+.bl-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.bl-title {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bl-kind {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  opacity: 0.45;
+  margin-right: auto;
+}
+
+.bl-acts { display: flex; gap: 4px }
+
+.bl-btn {
+  pointer-events: auto;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+.bl-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.bl-body {
+  flex: 1 1 auto;
+  min-height: 0;      /* or the iframe refuses to shrink inside the flex column */
+  overflow: auto;
+  position: relative;
+}
+
+/* A framed document fills the blade. It carries its own scrollbar, its own
+   stylesheet and its own CSP — see bridge/page.mjs. */
+.bl-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: dark;
+}
+
+.bl-image,
+.bl-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* contain, not cover: this is the thing being looked at, and cropping the
+     subject out of a photograph to fill a rectangle is the wrong trade. */
+  object-fit: contain;
+  background: var(--surface-media-dim);
+}
+
+.bl-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+.bl-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.bl-markup { padding: 14px 16px; text-transform: none; letter-spacing: normal }
+
+.bl-note {
+  padding: 22px;
+  opacity: 0.6;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 12px;
+}
+
+.bl-hint {
+  position: absolute;
+  bottom: 3.2vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  opacity: 0.42;
+  pointer-events: none;
+}
+.bl-hint kbd {
+  font: inherit;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 1px 4px;
+}
+
+/* The body scrollbar inside a blade, matched to the reader view's own. */
+.bl-body::-webkit-scrollbar { width: 9px }
+.bl-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  border-radius: 9px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bl { transition: none }
+}
+
+/* The slot carries the depth transform; the blade inside it carries the drag.
+   Both need a transform, and one element cannot serve two owners. */
+.bl-slot {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.bl-slot > .bl { pointer-events: auto }
+
+/* Dragged by the header, so the body stays selectable. */
+.bl-head { cursor: grab; user-select: none }
+.bl-head:active { cursor: grabbing }
+.bl-btn { cursor: pointer }
+
+.bl-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  /* Two hairlines, the usual visual shorthand for a resize corner. */
+  background:
+    linear-gradient(135deg, transparent 0 46%,
+      color-mix(in srgb, var(--accent) 60%, transparent) 46% 54%, transparent 54%),
+    linear-gradient(135deg, transparent 0 68%,
+      color-mix(in srgb, var(--accent) 40%, transparent) 68% 76%, transparent 76%);
+  opacity: 0.55;
+  touch-action: none;
+  z-index: 2;
+}
+.bl-grip:hover { opacity: 1 }
+
+/* A resized blade is sized inline, so the presets must not fight it. */
+.bl[style*="width"] { max-width: none; max-height: none }
+
+/* ------------------------------------------------------------------- hands */
+/*
+   The hand overlay. Above everything, because it shows where a press will land
+   and must never be occluded by the thing it is about to press. pointer-events
+   is none throughout — this is a picture of a pointer, not a pointer; the real
+   events are synthesised and dispatched at whatever is underneath (hands.ts).
+*/
+.hands-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  pointer-events: none;
+}
+
+/* The camera indicator. Deliberately always visible while tracking runs: an
+   interface that can see the room has to say so without being asked. */
+.hands-live {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 96;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: color-mix(in srgb, var(--accent) 90%, white);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-live));
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+.hands-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--camera-live);
+  box-shadow: 0 0 8px var(--camera-live);
+  animation: handsPulse 1.6s ease-in-out infinite;
+}
+@keyframes handsPulse {
+  0%, 100% { opacity: 1 }
+  50%      { opacity: 0.35 }
+}
+
+/* The legend. Bottom-left, out of the way of both the reactor and the blade
+   stack, and gone once you have proved you know how it works. */
+.gguide {
+  position: fixed;
+  left: 22px;
+  bottom: 22px;
+  z-index: 96;
+  min-width: 210px;
+  padding: 11px 13px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-guide));
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.gguide-head {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-bottom: 8px;
+}
+.gguide-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+.gguide-icon { width: 17px; font-size: 13px; line-height: 1; filter: saturate(0.2) }
+.gguide-name {
+  width: 44px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 95%, white);
+}
+.gguide-does { opacity: 0.68; font-size: 11px }
+.gguide-foot {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  opacity: 0.45;
+}
+.gguide-foot kbd {
+  font: inherit;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 0 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hands-live::before { animation: none }
+}
+
+/* Spun in CSS, deliberately. Under framer this was an infinitely repeating
+   animation, and AnimatePresence will not unmount a subtree whose animations
+   never end — which left the whole ignition overlay on top of the interface
+   for the entire session, swallowing every click and every pinch. */
+.ignition-ring { animation: ignitionSpin 18s linear infinite }
+
+@keyframes ignitionSpin {
+  from { transform: rotate(0deg) }
+  to   { transform: rotate(360deg) }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .ignition-ring { animation: none }
+}
+
+/* The live camera inside a blade. Mirrored, because a person expects their own
+   image to behave like a reflection — the frames sent to the model are not. */
+.bl-camera {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  background: var(--surface-media);
+}
+
+/* ---------------------------------------------------------------------------
+   Reader view — the stylesheet the bridge injects into a framed article
+   (bridge/page.mjs). Scoped under .rd so it can sit inside a blade preview.
+   --------------------------------------------------------------------------- */
+.rd {
+  font: 400 15px/1.62 var(--font-reader);
+  color: var(--reader-fg);
+  padding: 18px 22px 40px;
+  -webkit-font-smoothing: antialiased;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.rd-src { font: 500 10px/1 var(--font-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--reader-source); opacity: .8; }
+.rd-title { font-size: 25px; line-height: 1.2; font-weight: 600; color: var(--reader-title); margin: 10px 0 18px; }
+.rd-h { font-size: 16px; color: var(--reader-title); margin: 22px 0 8px; font-weight: 600; }
+.rd-p { margin: 0 0 14px; }
+.rd-li { margin: 0 0 7px 18px; }
+.rd-q { margin: 16px 0; padding-left: 14px; border-left: 2px solid var(--reactor-core); color: var(--reader-quote); font-style: italic; }
+.rd img { max-width: 100%; height: auto; display: block; border-radius: 4px; margin: 14px 0; }
+.rd-lead { margin-bottom: 18px; }
+.rd::-webkit-scrollbar { width: 9px; }
+.rd::-webkit-scrollbar-thumb { background: var(--reader-scrollbar); border-radius: 9px; }

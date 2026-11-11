@@ -1,0 +1,40 @@
+<!-- @dsCard group="Blades" height=380 subtitle="the surface for things meant to be looked at" -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap">
+<style>
+html,body{height:100%}body{margin:0;background:var(--bg)}
+.stage{position:relative;height:380px;display:grid;place-items:center}
+.bl{position:relative}.back{position:absolute;transform:translate(26px,18px) scale(.96);opacity:.85}
+.bl-hint{bottom:12px}
+</style>
+</head>
+<body>
+<div class="hud" style="--accent: var(--interface);text-transform:uppercase;letter-spacing:.16em">
+  <div class="stage">
+    <div class="bl bl-compact back" style="height:300px">
+      <div class="bl-head"><span class="bl-title">PAD DAMAGE LIMITED</span><span class="bl-kind">article</span></div>
+    </div>
+    <div class="bl bl-front bl-compact" style="height:300px">
+      <div class="bl-head">
+        <span class="bl-title">STARSHIP FLIGHT 11</span><span class="bl-kind">article</span>
+        <span class="bl-acts"><button class="bl-btn" title="expand">⤢</button><button class="bl-btn" title="close">×</button></span>
+      </div>
+      <div class="bl-body">
+        <div class="bl-markup">
+          <div class="hud-rows">
+            <div class="hud-row"><span class="hud-idx">01</span><span class="hud-main"><span class="hud-label">A blade takes the middle of the frame</span><span class="hud-sub">and covers the reactor, which is the point</span></span></div>
+            <div class="hud-row"><span class="hud-idx">02</span><span class="hud-main"><span class="hud-label">Only the front blade glows</span><span class="hud-sub">the ones behind read as paper</span></span></div>
+            <div class="hud-row"><span class="hud-idx">03</span><span class="hud-main"><span class="hud-label">Drag by the header, resize by the grip</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="bl-grip"></div>
+    </div>
+    <div class="bl-hint"><kbd>ESC</kbd> CLOSES · <kbd>TAB</kbd> CYCLES</div>
+  </div>
+</div>
+</body>
+</html>
