@@ -1,0 +1,35 @@
+<!-- @dsCard group="Frame" height=360 subtitle="corners, wordmark, status, rails" -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap">
+<style>html,body{height:100%}body{margin:0;background:var(--bg)}.hud-top{padding:0 46px}.rail-left{left:30px}.rail-right{right:30px}</style>
+</head>
+<body>
+<div class="hud" style="--accent: var(--phase-listening)">
+  <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
+  <div class="corner corner-bl"></div><div class="corner corner-br"></div>
+  <header class="hud-top">
+    <div class="brand">
+      <span class="brand-mark">J.A.R.V.I.S.</span>
+      <span class="brand-sub">Just A Rather Very Intelligent System</span>
+    </div>
+    <div class="status"><span class="dot"></span><span class="status-text">LISTENING</span></div>
+  </header>
+  <aside class="rail rail-left">
+    <div class="rail-title">SYSTEMS</div>
+    <div class="rail-item"><span class="tick"></span>GMAIL</div>
+    <div class="rail-item"><span class="tick"></span>CALENDAR</div>
+    <div class="rail-item"><span class="tick"></span>CHROME</div>
+    <div class="rail-item dim">CAMERA OFF</div>
+  </aside>
+  <aside class="rail rail-right">
+    <div class="rail-title">SIGNAL</div>
+    <div class="meter"><div class="meter-fill" style="transform: scaleY(0.62)"></div></div>
+    <div class="rail-item mono">062%</div>
+  </aside>
+  <footer class="hud-bottom"><span class="hint"><kbd>SPACE</kbd> TO TALK · <kbd>D</kbd> DIAGNOSTICS</span></footer>
+</div>
+</body>
+</html>

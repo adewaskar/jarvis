@@ -1,0 +1,46 @@
+<!-- @dsCard group="Panels" height=330 subtitle="the card: brackets, wipe, title, accents" -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap">
+<style>
+html,body{height:100%}body{margin:0;background:var(--bg)}
+.row{display:flex;gap:14px;padding:22px 24px;align-items:flex-start;flex-wrap:wrap}
+.row .panel{width:280px}
+.p-wipe{animation:wipe 0.7s ease-out both}
+@keyframes wipe{from{transform:translateY(-100%);opacity:.9}to{transform:translateY(300%);opacity:0}}
+@media (prefers-reduced-motion: reduce){.p-wipe{animation:none;opacity:0}}
+</style>
+</head>
+<body>
+<div class="hud" style="position:relative;inset:auto;--accent: var(--phase-thinking)">
+  <div class="row">
+    <section class="panel panel-default">
+      <span class="pk pk-tl"></span><span class="pk pk-tr"></span><span class="pk pk-bl"></span><span class="pk pk-br"></span>
+      <span class="p-wipe"></span>
+      <header class="p-head"><span class="p-title">DEFAULT · HOLDS THE INTERFACE CYAN</span></header>
+      <div class="p-body"><p class="hud-note">A panel is a record of a moment. Once it lands it keeps its accent while the phase moves underneath it.</p></div>
+    </section>
+    <section class="panel panel-amber">
+      <span class="pk pk-tl"></span><span class="pk pk-tr"></span><span class="pk pk-bl"></span><span class="pk pk-br"></span>
+      <span class="p-wipe" style="animation-delay:.3s"></span>
+      <header class="p-head"><span class="p-title">AMBER</span></header>
+      <div class="p-body p-stagger">
+        <div class="hud-rows">
+          <div class="hud-row"><span class="hud-idx">01</span><span class="hud-main"><span class="hud-label">Rows land one after another</span><span class="hud-sub">the stagger variant</span></span></div>
+          <div class="hud-row"><span class="hud-idx">02</span><span class="hud-main"><span class="hud-label">50ms, then 60ms per row</span></span></div>
+          <div class="hud-row"><span class="hud-idx">03</span><span class="hud-main"><span class="hud-label">shared past the tenth</span></span></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel panel-violet">
+      <span class="pk pk-tl"></span><span class="pk pk-tr"></span><span class="pk pk-bl"></span><span class="pk pk-br"></span>
+      <span class="p-wipe" style="animation-delay:.6s"></span>
+      <header class="p-head"><span class="p-title">VIOLET</span></header>
+      <div class="p-body"><p class="p-empty">no content returned</p></div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

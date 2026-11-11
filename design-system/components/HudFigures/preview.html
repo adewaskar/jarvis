@@ -1,0 +1,35 @@
+<!-- @dsCard group="Panels" height=300 subtitle="metric, unit, grid, note, bar" -->
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap">
+<style>html,body{height:100%}body{margin:0;background:var(--bg)}.wrap{padding:22px 24px;display:flex;gap:14px;flex-wrap:wrap}.panel{width:300px}</style>
+</head>
+<body>
+<div class="hud" style="position:relative;inset:auto;--accent: var(--interface)">
+  <div class="wrap">
+    <section class="panel panel-default">
+      <span class="pk pk-tl"></span><span class="pk pk-tr"></span><span class="pk pk-bl"></span><span class="pk pk-br"></span>
+      <header class="p-head"><span class="p-title">INBOX</span></header>
+      <div class="p-body">
+        <div><span class="hud-metric">1,284</span><span class="hud-unit">unread since monday</span></div>
+        <div class="hud-grid" style="margin-top:14px">
+          <div><span class="hud-metric" style="font-size:20px">62%</span><span class="hud-unit">triaged</span><div class="hud-bar" style="--v:0.62;margin-top:6px"></div></div>
+          <div><span class="hud-metric" style="font-size:20px">9</span><span class="hud-unit">need a reply</span><div class="hud-bar" style="--v:0.18;margin-top:6px"></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel panel-green">
+      <span class="pk pk-tl"></span><span class="pk pk-tr"></span><span class="pk pk-bl"></span><span class="pk pk-br"></span>
+      <header class="p-head"><span class="p-title">STATUS</span></header>
+      <div class="p-body">
+        <p class="hud-note">Three of the four services are nominal. <span class="hud-hot">Vercel is degraded</span> in eu-west; the <span class="hud-dim">last incident</span> closed at 04:12.</p>
+        <div class="hud-bar" style="--v:0.75;margin-top:12px"></div>
+        <span class="hud-caption">75% of checks passing</span>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

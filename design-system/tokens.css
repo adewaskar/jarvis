@@ -1,0 +1,253 @@
+/* JARVIS HUD — generated from tokens.json */
+:root, [data-theme="dark"] {
+  --bg: #01060c;
+  --interface: #00e5ff;
+  --accent: var(--interface);
+  --scanline: rgba(0, 229, 255, 0.028);
+  --vignette: rgba(0, 0, 0, 0.55);
+  --phase-offline: #0d4a4a;
+  --phase-boot: #17b3b3;
+  --phase-dormant: #12908f;
+  --phase-waking: #5cf2ef;
+  --phase-listening: #19d8d2;
+  --phase-thinking: #f0a93c;
+  --phase-tooling: #a97bff;
+  --phase-speaking: #3ef2a8;
+  --panel-amber: #ffb547;
+  --panel-violet: #c77dff;
+  --panel-green: #5affc8;
+  --panel-red: #ff6b6b;
+  --ink-label: #e8f8ff;
+  --ink-reply: #eaf9ff;
+  --ink-note: #dff4ff;
+  --ink-metric: #eafaff;
+  --ink-tool: #f2fbff;
+  --ink-boot: #eafcff;
+  --ink-blade: #e6f9ff;
+  --ink-reactor-lit: #dffbff;
+  --ink-caption: #ffffff;
+  --ignition-ink: #4fd6ff;
+  --ignition-core: #04121c;
+  --error: #ff6b6b;
+  --camera-live: #ff4d4d;
+  --reactor-core: #19c4c4;
+  --reactor-hot: #c9fdff;
+  --reactor-vector: #05161a;
+  --surface-chip: rgba(2, 10, 12, 0.55);
+  --surface-blade: rgba(4, 12, 18, 0.94);
+  --surface-blade-deep: rgba(2, 8, 12, 0.96);
+  --surface-live: rgba(2, 8, 12, 0.8);
+  --surface-guide: rgba(2, 8, 12, 0.86);
+  --surface-diag: rgba(2, 10, 12, 0.94);
+  --surface-media: #000000;
+  --surface-media-dim: rgba(0, 0, 0, 0.35);
+  --glitch-magenta: rgba(255, 40, 90, 0.13);
+  --glitch-cyan: rgba(40, 220, 255, 0.13);
+  --diag-fg: #cfe6e3;
+  --diag-muted: #6d8886;
+  --diag-ok: #3ef2a8;
+  --diag-bad: #ff6b6b;
+  --diag-rule: rgba(255, 255, 255, 0.12);
+  --diag-rule-soft: rgba(255, 255, 255, 0.08);
+  --reader-fg: #cfe9ee;
+  --reader-title: #eafcff;
+  --reader-source: #5fd8e0;
+  --reader-quote: #9fdbe2;
+  --reader-scrollbar: #19c4c455;
+  --live-page-bg: #06101a;
+  --glow-tick: 0 0 8px #00e5ff;
+  --glow-dot: 0 0 12px #00e5ff;
+  --glow-chip: 0 0 30px rgba(0, 229, 255, 0.22);
+  --glow-boot-frame: inset 0 0 40px rgba(0, 229, 255, 0.12), 0 0 30px rgba(0, 229, 255, 0.18);
+  --glow-wave: 0 0 44px rgba(0, 229, 255, 0.6), inset 0 0 44px rgba(0, 229, 255, 0.35);
+  --shadow-blade: 0 24px 70px rgba(0, 0, 0, 0.62), inset 0 0 0 1px rgba(0, 229, 255, 0.08);
+  --shadow-blade-front: 0 26px 80px rgba(0, 0, 0, 0.7), 0 0 34px -10px rgba(0, 229, 255, 0.46), inset 0 0 0 1px rgba(0, 229, 255, 0.16);
+}
+:root {
+  --inset-corner: 26px;
+  --inset-frame: 44px;
+  --inset-rail: 92px;
+  --inset-guide: 22px;
+  --gap-rail: 9px;
+  --gap-rows: 9px;
+  --gap-row: 10px;
+  --gap-main: 2px;
+  --gap-status: 10px;
+  --gap-panels: 14px;
+  --gap-log: 12px;
+  --gap-who: 14px;
+  --gap-gallery: 6px;
+  --gap-grid-row: 10px;
+  --gap-grid-col: 16px;
+  --gap-chip: 14px;
+  --pad-panel-y: 14px;
+  --pad-panel-x: 16px;
+  --pad-chip-y: 7px;
+  --pad-chip-x: 16px;
+  --pad-blade-head-y: 9px;
+  --pad-blade-head-x: 14px;
+  --pad-btn-y: 4px;
+  --pad-btn-x: 7px;
+  --pad-note: 22px;
+  --pad-reader-y: 18px;
+  --pad-reader-x: 22px;
+  --offset-tool-badge: 74px;
+  --offset-log: 132px;
+  --offset-suggest: 96px;
+  --offset-caption: 88px;
+  --offset-error: 52px;
+  --margin-caption: 8px;
+  --margin-head: 10px;
+  --radius-none: 0;
+  --radius-chip: 2px;
+  --radius-scrollbar: 9px;
+  --radius-round: 50%;
+  --glow-brand: 0 0 22px rgba(0, 229, 255, 0.7);
+  --glow-reply: 0 0 26px rgba(0, 229, 255, 0.45);
+  --glow-metric: 0 0 30px rgba(0, 229, 255, 0.65);
+  --glow-tool-name: 0 0 24px rgba(0, 229, 255, 0.55);
+  --glow-hot: 0 0 16px rgba(0, 229, 255, 0.6);
+  --glow-ghost: 0 0 16px rgba(0, 229, 255, 0.7);
+  --glow-boot-title: 0 0 26px rgba(0, 229, 255, 0.6);
+  --glow-ignition: 0 0 30px rgba(79, 214, 255, 0.7);
+  --glow-blade-tool: 0 0 18px #00e5ff, 0 0 44px rgba(0, 229, 255, 0.55);
+  --corner-size: 46px;
+  --bracket-size: 12px;
+  --tick-size: 5px;
+  --dot-size: 7px;
+  --spinner-size: 9px;
+  --meter-width: 3px;
+  --meter-height: 96px;
+  --bar-height: 2px;
+  --panel-right-width: 320px;
+  --panel-right-inset: 150px;
+  --panel-left-width: 280px;
+  --panel-left-inset: 272px;
+  --panel-wide-width: 620px;
+  --panel-max-height: 46vh;
+  --log-width: 760px;
+  --media-max-height: 300px;
+  --thumb-min: 84px;
+  --thumb-row: 56px;
+  --tool-name-max: 620px;
+  --blade-compact-width: 440px;
+  --blade-tall-width: 560px;
+  --blade-wide-width: 1080px;
+  --grip-size: 18px;
+  --ignition-ring: 240px;
+  --boot-stage: 520px;
+  --instruments-size: 820px;
+  --diag-width: 24rem;
+  --backdrop-chip: 5px;
+  --backdrop-diag: 6px;
+  --backdrop-panel: 7px;
+  --backdrop-live: 8px;
+  --backdrop-guide: 10px;
+  --backdrop-blade: 14px;
+  --blur-boot-dim: 0.6px;
+  --dim-faint: 0.3;
+  --dim-low: 0.35;
+  --dim-chrome: 0.38;
+  --dim-title: 0.4;
+  --dim-tag: 0.42;
+  --dim-muted: 0.45;
+  --dim-secondary: 0.5;
+  --dim-user: 0.52;
+  --dim-kicker: 0.6;
+  --dim-p-title: 0.62;
+  --dim-does: 0.68;
+  --dim-note: 0.8;
+  --dim-rail: 0.82;
+  --dim-caption: 0.85;
+  --z-scene: 1;
+  --z-instruments: 2;
+  --z-hud: 4;
+  --z-scanlines: 5;
+  --z-surface: 6;
+  --z-ignition: 7;
+  --z-fx: 9;
+  --z-diag: 20;
+  --z-hands-canvas: 95;
+  --z-hands-live: 96;
+  --t-accent: 600ms;
+  --t-meter: 90ms;
+  --t-cell: 120ms;
+  --t-button: 160ms;
+  --t-exit: 300ms;
+  --t-row-in: 340ms;
+  --t-stagger-first: 50ms;
+  --t-stagger-step: 60ms;
+  --t-suggest: 350ms;
+  --t-flash: 480ms;
+  --t-shake: 520ms;
+  --t-glitch: 620ms;
+  --t-wipe: 700ms;
+  --t-spin: 700ms;
+  --t-scan: 900ms;
+  --t-wave: 900ms;
+  --t-pulse: 1.8s;
+  --t-blade-carry: 3.2s;
+  --t-ignition-spin: 18s;
+  --spring-stiffness: 300;
+  --spring-damping: 28;
+  --ease-blade: cubic-bezier(0.45, 0, 0.25, 1);
+  --ease-carry: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-scan: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-wave: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-shake: cubic-bezier(0.36, 0.07, 0.19, 0.97);
+  --font-display: 'Chakra Petch', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-system-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-reader: ui-sans-serif, -apple-system, 'Segoe UI', sans-serif;
+}
+.brand-mark { font-family: var(--font-display); font-size: 19px; line-height: 1.2; font-weight: 600; letter-spacing: 0.42em; }
+.brand-sub { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.22em; }
+.hud-base { font-family: var(--font-display); font-size: 11px; line-height: 1.2; font-weight: 400; letter-spacing: 0.16em; }
+.status { font-family: var(--font-display); font-size: 10px; line-height: 1.2; font-weight: 400; letter-spacing: 0.16em; }
+.rail-title { font-family: var(--font-display); font-size: 8px; line-height: 1.2; font-weight: 400; letter-spacing: 0.34em; }
+.rail-item { font-family: var(--font-display); font-size: 10px; line-height: 1.2; font-weight: 400; letter-spacing: 0.16em; }
+.tool-kicker { font-family: var(--font-display); font-size: 8px; line-height: 1.2; font-weight: 400; letter-spacing: 0.36em; }
+.tool-name { font-family: var(--font-display); font-size: 14px; line-height: 1.2; font-weight: 400; letter-spacing: 0.24em; }
+.p-title { font-family: var(--font-display); font-size: 8px; line-height: 1.2; font-weight: 400; letter-spacing: 0.3em; }
+.hud-tag { font-family: var(--font-display); font-size: 8px; line-height: 1.2; font-weight: 400; letter-spacing: 0.14em; }
+.hud-unit { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.24em; }
+.log-who { font-family: var(--font-display); font-size: 8px; line-height: 1.2; font-weight: 400; letter-spacing: 0.26em; }
+.hud-bottom { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.2em; }
+.suggest-lead { font-family: var(--font-display); font-size: 8px; line-height: 1.2; font-weight: 400; letter-spacing: 0.34em; }
+.ignition-word { font-family: var(--font-display); font-size: 15px; line-height: 1.2; font-weight: 400; letter-spacing: 0.52em; }
+.ignition-sub { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.28em; }
+.p-empty { font-family: var(--font-display); font-size: 10px; line-height: 1.2; font-weight: 400; letter-spacing: 0.16em; }
+.bl-title { font-family: var(--font-display); font-size: 10px; line-height: 1.2; font-weight: 400; letter-spacing: 0.2em; }
+.bl-kind { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.14em; }
+.bl-btn { font-family: var(--font-display); font-size: 11px; line-height: 1; font-weight: 400; letter-spacing: 0.16em; }
+.bl-hint { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.14em; }
+.hands-live { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.18em; }
+.gguide-head { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.2em; }
+.gguide-name { font-family: var(--font-display); font-size: 9px; line-height: 1.2; font-weight: 400; letter-spacing: 0.14em; }
+.log-line { font-family: var(--font-display); font-size: 14px; line-height: 1.55; font-weight: 400; letter-spacing: 0.01em; }
+.caption { font-family: var(--font-display); font-size: 16px; line-height: 1.3; font-weight: 400; letter-spacing: 0.02em; }
+.hud-label { font-family: var(--font-display); font-size: 12.5px; line-height: 1.35; font-weight: 400; letter-spacing: 0; }
+.hud-sub { font-family: var(--font-display); font-size: 10.5px; line-height: 1.35; font-weight: 400; letter-spacing: 0; }
+.hud-note { font-family: var(--font-display); font-size: 12px; line-height: 1.55; font-weight: 400; letter-spacing: 0; }
+.hud-caption { font-family: var(--font-display); font-size: 10px; line-height: 1.3; font-weight: 400; letter-spacing: 0; }
+.suggest-text { font-family: var(--font-display); font-size: 13px; line-height: 1.3; font-weight: 400; letter-spacing: 0.03em; }
+.error { font-family: var(--font-display); font-size: 10px; line-height: 1.3; font-weight: 400; letter-spacing: 0.04em; }
+.gguide-row { font-family: var(--font-display); font-size: 11px; line-height: 1.3; font-weight: 400; letter-spacing: 0; }
+.bl-note { font-family: var(--font-display); font-size: 12px; line-height: 1.4; font-weight: 400; letter-spacing: 0; }
+.hud-metric { font-family: var(--font-mono); font-size: 40px; line-height: 1; font-weight: 400; letter-spacing: 0; }
+.hud-idx { font-family: var(--font-mono); font-size: 9px; line-height: 1.3; font-weight: 400; letter-spacing: 0; }
+.rail-mono { font-family: var(--font-mono); font-size: 10px; line-height: 1.2; font-weight: 400; letter-spacing: 0.1em; }
+.boot-bar-title { font-family: var(--font-mono); font-size: 40px; line-height: 1.1; font-weight: 300; letter-spacing: 0.14em; }
+.boot-name { font-family: var(--font-mono); font-size: 20px; line-height: 1; font-weight: 400; letter-spacing: 0; }
+.boot-log { font-family: var(--font-mono); font-size: 10px; line-height: 1.9; font-weight: 400; letter-spacing: 0.06em; }
+.boot-tag { font-family: var(--font-mono); font-size: 9px; line-height: 1; font-weight: 400; letter-spacing: 0.14em; }
+.blade-tool { font-family: var(--font-mono); font-size: 10px; line-height: 1.2; font-weight: 400; letter-spacing: 0.3em; }
+.kbd { font-family: var(--font-mono); font-size: 9px; line-height: 1.4; font-weight: 400; letter-spacing: 0; }
+.decode-ghost { font-family: var(--font-mono); font-size: 0.92em; line-height: 1.55; font-weight: 400; letter-spacing: 0; }
+.ins-label { font-family: var(--font-system-mono); font-size: 13px; line-height: 1; font-weight: 400; letter-spacing: 0.18em; }
+.diag { font-family: var(--font-system-mono); font-size: 0.72rem; line-height: 1.6; font-weight: 400; letter-spacing: 0; }
+.diag-verdict { font-family: var(--font-system-mono); font-size: 0.78rem; line-height: 1.6; font-weight: 400; letter-spacing: 0; }
+.rd-body { font-family: var(--font-reader); font-size: 15px; line-height: 1.62; font-weight: 400; letter-spacing: 0; }
+.rd-title { font-family: var(--font-reader); font-size: 25px; line-height: 1.2; font-weight: 600; letter-spacing: 0; }
+.rd-h { font-family: var(--font-reader); font-size: 16px; line-height: 1.3; font-weight: 600; letter-spacing: 0; }
+.rd-src { font-family: var(--font-mono); font-size: 10px; line-height: 1; font-weight: 500; letter-spacing: 0.16em; }
