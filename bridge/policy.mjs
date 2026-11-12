@@ -159,7 +159,9 @@ export function decideTool(name, allowWrites = false) {
     }
     // The session tools this bridge is developed inside count as read-only too.
     if (READ_ONLY_MCP.has(server) || server.startsWith('ccd_session')) return true
-    return READ_VERB.test(tool) ? true : allowWrites
+    // Some servers namespace their tools (`homeassistant__GetLiveContext`),
+    // which hid the verb from an anchored match and refused plain reads.
+    return READ_VERB.test(tool) || READ_VERB.test(tool.split('__').pop()) ? true : allowWrites
   }
   return allowWrites
 }
