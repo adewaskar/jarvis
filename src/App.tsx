@@ -13,7 +13,7 @@ import * as hands from './lib/hands'
 import { listenForClap } from './lib/clap'
 import * as camera from './lib/camera'
 import * as kokoro from './lib/kokoro'
-import { TTS_ENGINE } from './config'
+import { MULTICA_MODE, TTS_ENGINE } from './config'
 import { forTool, attention } from './lib/fillers'
 import {
   ask,
@@ -26,7 +26,9 @@ import {
   watchUi,
   watchConnection,
   connectedLabels,
+  acknowledgeResponse,
   usingBridge,
+  usingMultica,
   type Msg,
 } from './lib/brain'
 import { startAnalyser, micLevel } from './lib/audio'
@@ -147,7 +149,7 @@ export default function App() {
     let filled = false
 
     try {
-      const { text } = await ask(said, history.current, {
+      const { text, responseId } = await ask(said, history.current, {
         onText: (delta) => {
           if (stale()) return
           if (!started) {
@@ -196,6 +198,7 @@ export default function App() {
 
       await spk.end()
       if (stale()) return
+      acknowledgeResponse(responseId)
       sfx.play('done')
     } catch (err) {
       if (stale()) return
@@ -211,9 +214,16 @@ export default function App() {
         music.duck(false)
         store.getState().setActiveTool(null)
         music.working(false)
-        // Stay open. Having to say his name again to add one more sentence is
-        // the difference between a conversation and a vending machine.
-        listen(FOLLOW_UP_MS)
+        if (usingMultica) {
+          // Pilot turns are explicitly push-to-talk and sequential. Requiring
+          // Space again also prevents an open follow-up mic from starting an
+          // accidental asynchronous task while the user is thinking.
+          goDormant()
+        } else {
+          // Stay open. Having to say his name again to add one more sentence is
+          // the difference between a conversation and a vending machine.
+          listen(FOLLOW_UP_MS)
+        }
       }
     }
   }
@@ -227,7 +237,7 @@ export default function App() {
       case 'boot':
         return 'deaf'
       case 'dormant':
-        return 'wake'
+        return MULTICA_MODE ? 'deaf' : 'wake'
       case 'waking':
       case 'listening':
         return 'command'
@@ -458,7 +468,11 @@ export default function App() {
       } else if (state === 'reconnected') {
         store
           .getState()
-          .setError('Bridge reconnected. The previous conversation was not kept.')
+          .setError(
+            usingMultica
+              ? 'Bridge reconnected. Completed turns remain in Multica issue history.'
+              : 'Bridge reconnected. The previous conversation was not kept.',
+          )
       }
     })
     const warming = warm().catch((err: Error) => s.setError(err.message))

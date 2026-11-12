@@ -20,7 +20,8 @@ export type { ConnectionState } from './bridge'
  *            and can only use remote HTTP MCP servers.
  */
 
-export const usingBridge = BACKEND === 'bridge'
+export const usingBridge = BACKEND !== 'direct'
+export const usingMultica = BACKEND === 'multica'
 
 /** Conversation state lives in the bridge session, so history is only threaded
  *  through on the direct path. */
@@ -28,7 +29,7 @@ export async function ask(
   prompt: string,
   history: Msg[],
   handlers: AskHandlers,
-): Promise<{ text: string; tools: string[] }> {
+): Promise<{ text: string; tools: string[]; responseId?: string }> {
   return usingBridge
     ? bridge.ask(prompt, handlers)
     : direct.ask([...history, { role: 'user', content: prompt }], handlers)
@@ -98,6 +99,10 @@ export function cancel(): void {
 /** The older name for `cancel()`. */
 export function interrupt(): void {
   cancel()
+}
+
+export function acknowledgeResponse(responseId?: string): void {
+  if (usingBridge) bridge.acknowledgeResponse(responseId)
 }
 
 /**

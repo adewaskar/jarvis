@@ -17,6 +17,10 @@
 
 import { WebSocketServer } from 'ws'
 import { query } from '@anthropic-ai/claude-agent-sdk'
+import {
+  attachMulticaSocket,
+  createMulticaAdapterFromEnv,
+} from './multica.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
@@ -36,6 +40,10 @@ import {
 } from './policy.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
+const BRIDGE_BACKEND = process.env.JARVIS_BACKEND?.trim() || 'claude'
+if (!['claude', 'multica'].includes(BRIDGE_BACKEND)) {
+  throw new Error('JARVIS_BACKEND must be either "claude" or "multica".')
+}
 
 /**
  * Which interface to listen on. Loopback, unless you say otherwise.
@@ -1071,6 +1079,20 @@ server.on('error', (err) => {
   )
   process.exit(1)
 })
+
+let multicaAdapter = null
+if (BRIDGE_BACKEND === 'multica') {
+  try {
+    multicaAdapter = createMulticaAdapterFromEnv()
+    await multicaAdapter.initialize()
+  } catch (err) {
+    console.error(
+      `[jarvis] Multica backend configuration failed: ${err?.message ?? err}`,
+    )
+    process.exit(1)
+  }
+}
+
 await new Promise((resolve) => server.listen(PORT, HOST, resolve))
 
 const LOOPBACK = HOST === '127.0.0.1' || HOST === '::1' || HOST === 'localhost'
@@ -1086,21 +1108,25 @@ if (!LOOPBACK) {
 console.log(
   `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
 )
-console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
-console.log(
-  `[jarvis] MCP servers from config: ${Object.keys(MCP_SERVERS).join(', ') || 'none'}` +
-    (ACCOUNT_CONNECTORS ? ' · account connectors ON' : ' · account connectors off'),
-)
-console.log(
-  `[jarvis] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
-    (ALLOW_WRITES ? '' : ' — set JARVIS_ALLOW_WRITES=1 to permit shell/file/device actions'),
-)
+if (multicaAdapter) {
+  console.log('[jarvis] backend Multica · asynchronous issue turns')
+} else {
+  console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
+  console.log(
+    `[jarvis] MCP servers from config: ${Object.keys(MCP_SERVERS).join(', ') || 'none'}` +
+      (ACCOUNT_CONNECTORS ? ' · account connectors ON' : ' · account connectors off'),
+  )
+  console.log(
+    `[jarvis] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
+      (ALLOW_WRITES ? '' : ' — set JARVIS_ALLOW_WRITES=1 to permit shell/file/device actions'),
+  )
+}
 // Asynchronous, so it lands a beat after the rest of the banner. Worth printing
 // at all because an extension that is simply not running is indistinguishable
 // at the tool boundary from one that is broken, and this is the one place the
 // difference can be stated before anybody asks a question that depends on it.
 if (DISABLED.size) console.log(`[jarvis] disabled: ${[...DISABLED].join(', ')}`)
-if (!DISABLED.has('browser')) void chromeAvailable().then((ok) => {
+if (!multicaAdapter && !DISABLED.has('browser')) void chromeAvailable().then((ok) => {
   console.log(
     ok
       ? `[jarvis] browser control ready${ALLOW_WRITES ? '' : ' (reading only — clicking and typing need JARVIS_ALLOW_WRITES=1)'}`
@@ -1129,10 +1155,19 @@ const RESULT_FAILURES = {
 wss.on('connection', (socket) => {
   console.log('[jarvis] client connected')
 
+  if (multicaAdapter) {
+    attachMulticaSocket(socket, multicaAdapter)
+    return
+  }
+
   // Answer the HUD straight away rather than making it wait for the agent's
   // first turn. Refined later by the real init message.
   socket.send(
-    JSON.stringify({ type: 'ready', servers: Object.keys(MCP_SERVERS) }),
+    JSON.stringify({
+      type: 'ready',
+      servers: Object.keys(MCP_SERVERS),
+      backend: 'claude',
+    }),
   )
 
   /** Resolves the pending user message into the SDK's input generator. */
@@ -1513,7 +1548,7 @@ wss.on('connection', (socket) => {
               const usable = (msg.mcp_servers ?? [])
                 .filter((s) => s.status !== 'needs-auth' && s.status !== 'failed')
                 .map((s) => s.name)
-              send({ type: 'ready', servers: usable })
+              send({ type: 'ready', servers: usable, backend: 'claude' })
               console.log(`[jarvis] ${usable.length} MCP servers available`)
             }
             break
