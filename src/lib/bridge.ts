@@ -35,6 +35,46 @@ type Frame = {
   seconds?: number
   when?: string
   servers?: Array<string | { name?: string }>
+  card?: Partial<ConfirmCard>
+  private?: boolean
+}
+
+/**
+ * An approval the bridge needs from the person at the keyboard: an action in
+ * the policy's confirm tier, or a site the leak guard is holding back because
+ * private data is in the conversation. Only a key press or click in the page
+ * answers it — see ui/Confirm.tsx — which is the whole point: nothing the model
+ * writes can reach this handler.
+ */
+export type ConfirmCard = {
+  /** The bridge's id for this request, so it can withdraw the card. */
+  id: string
+  /** action: something that changes things. site: a site not yet reached
+   *  this session. leak: a site not yet approved, with private data in. */
+  kind: 'action' | 'site' | 'leak'
+  title: string
+  tool: string
+  detail: string
+  note: string
+}
+
+let onConfirm: ((card: ConfirmCard) => Promise<boolean>) | null = null
+export function watchConfirm(fn: ((card: ConfirmCard) => Promise<boolean>) | null) {
+  onConfirm = fn
+}
+
+/** The bridge withdrawing a card: its turn ended or was interrupted, or the
+ *  bridge stopped waiting. `null` withdraws every card (the socket closed). */
+let onConfirmCancel: ((id: string | null) => void) | null = null
+export function watchConfirmCancel(fn: ((id: string | null) => void) | null) {
+  onConfirmCancel = fn
+}
+
+/** Whether private data is in the current session, so the HUD can say so.
+ *  A new socket is a new session, which starts clean. */
+let onGuard: ((isPrivate: boolean) => void) | null = null
+export function watchGuard(fn: ((isPrivate: boolean) => void) | null) {
+  onGuard = fn
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
@@ -160,6 +200,11 @@ function scheduleReconnect() {
  * warmBridge() call leaked another listener onto the same socket.
  */
 function dispatch(ws: WebSocket) {
+  // A new socket is a new agent session, and a new session holds nothing yet.
+  onGuard?.(false)
+  // A card dies with the socket that asked for it: the bridge has already
+  // counted it as a no, so leaving it up would be asking for nothing.
+  ws.addEventListener('close', () => onConfirmCancel?.(null))
   ws.addEventListener('message', (e: MessageEvent) => {
     let msg: Frame
     try {
@@ -203,6 +248,33 @@ function dispatch(ws: WebSocket) {
           .then(reply)
           .catch((err) => reply({ error: String(err?.message ?? err) }))
       }
+    } else if (msg.type === 'confirm' && msg.id) {
+      const id = msg.id
+      // Anything but an explicit yes is a no, including having no card to show.
+      const answer = (allow: boolean) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'reply', id, allow }))
+        }
+      }
+      const c = msg.card ?? {}
+      if (!onConfirm) {
+        answer(false)
+      } else {
+        onConfirm({
+          id,
+          kind: c.kind === 'leak' || c.kind === 'site' ? c.kind : 'action',
+          title: String(c.title ?? 'Allow this?'),
+          tool: String(c.tool ?? ''),
+          detail: String(c.detail ?? ''),
+          note: String(c.note ?? ''),
+        })
+          .then((ok) => answer(ok === true))
+          .catch(() => answer(false))
+      }
+    } else if (msg.type === 'confirm-cancel' && msg.id) {
+      onConfirmCancel?.(msg.id)
+    } else if (msg.type === 'guard') {
+      onGuard?.(msg.private === true)
     } else if (msg.type === 'ui' && msg.op) {
       // A `ui` frame with no args is normal — reset and clear take none — so an
       // absent args object is an empty one, not a reason to drop the command.

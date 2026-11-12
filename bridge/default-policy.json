@@ -1,0 +1,77 @@
+{
+  "$comment": [
+    "What JARVIS may do. Copy this file to ~/.jarvis/policy.json (or point JARVIS_POLICY at a copy) and edit it there; a policy file there replaces this one entirely.",
+    "Each entry is an exact tool name, or a pattern where * stands for the rest of one part of the name (it never crosses the __ between server and tool). Precedence: deny, then confirm, then allow. A tool on no list is denied, and the bridge prints every such tool at startup so you can decide where it belongs.",
+    "Prefer exact names. A pattern like mcp__x__get* also admits get_or_delete, which is the guessing-from-names this file replaces. The whole-server entries below are search services whose every tool is a lookup; list the tools of anything else one by one.",
+    "confirm: the action waits for you to press Enter on screen. Without --writes those tools are refused outright.",
+    "publicServers: MCP servers whose results are public (search, generation). Every other server's results count as private and switch on the leak guard.",
+    "trustedHosts: hosts JARVIS may reach without asking, even after private data is in the conversation. Subdomains are included. Never list a host that carries other people's content (paste sites, form services, file shares).",
+    "askBeforeNewSites: \"always\" asks before every site JARVIS has not reached yet in this session, from the first call. \"afterPrivateRead\" asks only once something private has been read. An approval lasts for the session."
+  ],
+  "askBeforeNewSites": "always",
+  "allow": [
+    "Read",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "ToolSearch",
+    "TodoWrite",
+
+    "mcp__jarvis__*",
+    "mcp__jarvis_ui__*",
+    "mcp__jarvis_eyes__*",
+
+    "mcp__jarvis_chrome__chrome_status",
+    "mcp__jarvis_chrome__chrome_tabs",
+    "mcp__jarvis_chrome__chrome_navigate",
+    "mcp__jarvis_chrome__chrome_new_tab",
+    "mcp__jarvis_chrome__chrome_read_page",
+    "mcp__jarvis_chrome__chrome_page_text",
+    "mcp__jarvis_chrome__chrome_find",
+    "mcp__jarvis_chrome__chrome_screenshot",
+    "mcp__jarvis_chrome__chrome_scroll",
+    "mcp__jarvis_chrome__chrome_console",
+    "mcp__jarvis_chrome__chrome_network",
+
+    "mcp__exa__*",
+    "mcp__exa-code__*",
+    "mcp__serper__*",
+    "mcp__serpapi__*",
+    "mcp__mcp-registry__*",
+
+    "mcp__openrouter__send-message",
+    "mcp__higgsfield__generate_image",
+    "mcp__elevenlabs__text_to_speech",
+    "mcp__elevenlabs__speech_to_text"
+  ],
+  "confirm": [
+    "Bash",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "mcp__jarvis_chrome__chrome_click",
+    "mcp__jarvis_chrome__chrome_type",
+    "mcp__jarvis_chrome__chrome_key",
+    "mcp__jarvis_chrome__chrome_form_input",
+    "mcp__jarvis_chrome__chrome_close_tab"
+  ],
+  "deny": [
+    "Agent",
+    "Task"
+  ],
+  "publicServers": [
+    "exa",
+    "exa-code",
+    "serper",
+    "serpapi",
+    "mcp-registry",
+    "lottie-search",
+    "openrouter",
+    "openrouter-image",
+    "higgsfield",
+    "elevenlabs"
+  ],
+  "trustedHosts": []
+}

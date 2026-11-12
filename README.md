@@ -93,7 +93,7 @@ the brain and the hands.
   │  local VAD  →  speech to text      │   ws   │  Claude Agent SDK                │
   │  reactor UI (Three.js + GLSL)      │◄─────► │   = Claude Code, headless        │
   │  text to speech                    │  8787  │  spawns your MCP servers         │
-  │  heads-up display                  │        │  permission gate (decideTool)    │
+  │  heads-up display                  │        │  permission gate + leak guard    │
   └────────────────────────────────────┘        └──────────────────────────────────┘
 ```
 
@@ -234,6 +234,8 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
 | `JARVIS_EFFORT` | `medium` | Reasoning effort |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
+| `JARVIS_POLICY` | `~/.jarvis/policy.json`, else `bridge/default-policy.json` | The tool policy file (see below) |
+| `JARVIS_TRUSTED_HOSTS` | none | Comma-separated hosts JARVIS may reach without asking, even after reading private data |
 | `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
 | `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
 | `JARVIS_DISABLE` | none | Comma-separated capabilities to leave out: `browser`, `camera`, `interface` |
@@ -245,8 +247,10 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_CLAUDE_EXECUTABLE` | bundled CLI | Run the agent through this executable instead, e.g. a sandbox wrapper that execs the real CLI |
 | `JARVIS_CHROME_PIPE` | none | WSL only: the Windows pipe name the browser relay connects to |
 | `JARVIS_DEBUG` | off | `1` logs every agent message to the bridge terminal, answer text and tool calls included |
-| `JARVIS_VOICE_ID` | none | ElevenLabs voice id |
-| `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe |
+| `JARVIS_VOICE_ID` | George (`JBFqnCBsd6RMkjVDRZzb`) | ElevenLabs voice id; `npm run voices` helps you pick one |
+| `JARVIS_TTS_MODEL` | `eleven_flash_v2_5` | ElevenLabs model. Flash starts speaking fastest; `eleven_turbo_v2_5` or `eleven_multilingual_v2` sound richer |
+| `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe. Never passed to the agent |
+| `JARVIS_ENV_FILE` | `~/.jarvis/.env` | A private settings file the bridge loads at start; variables set in the shell win |
 
 ### Frontend (`.env.local`)
 
@@ -261,23 +265,117 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 
 ### Adding an ElevenLabs key
 
-You do not have to touch a flag. Either:
+You do not have to touch a flag. Put the key in `~/.jarvis/.env`, outside the
+repository so no commit can pick it up:
 
-- Set `ELEVENLABS_API_KEY` on the bridge before starting it, **or**
-- Add the key to your `elevenlabs` MCP server's env in `~/.claude.json` — the
-  bridge reads it from there too.
+```
+ELEVENLABS_API_KEY=your-key
+JARVIS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
+```
 
-Either way, `/health` starts reporting the capability, the browser picks it up on
-the next boot, and both the voice and transcription upgrade automatically.
+Setting `ELEVENLABS_API_KEY` in the shell works too, and so does a key in your
+`elevenlabs` MCP server's env in `~/.claude.json`. Either way, `/health` starts
+reporting the capability, the browser picks it up on the next boot, and both the
+voice and transcription upgrade automatically. The startup log says which voice
+and model it is using and where the key came from, never the key itself.
+
+To choose a voice, run `npm run voices`. It saves the same line read by each
+British male voice on your account to `~/.jarvis/voice-samples/` and prints the
+id to use (`-- --all` for every voice, `-- <id>` for one). Use a voice from the
+library or one you've designed; don't clone a real person's voice without their
+permission.
+
+The key stays with the bridge. The agent's process is started without it, so a
+shell command cannot print it, and its file tools refuse `.env` files and
+`~/.jarvis/policy.json`.
 
 ---
+
+## The tool policy
+
+What JARVIS may call is an explicit list in `bridge/default-policy.json`. Every
+tool is **allow**, **confirm** or **deny**, and a tool on no list is denied. At
+startup the bridge prints every tool it is refusing for that reason, so you can
+decide where each one belongs. To change it, copy the file to
+`~/.jarvis/policy.json` and edit the copy. Your file replaces the default
+entirely, and a file that won't parse stops the bridge rather than falling back.
+
+An entry is an exact tool name, or a pattern where `*` stands for the rest of
+one part of the name. Prefer exact names: `mcp__x__get*` also admits
+`get_or_delete`. The default lists whole servers only for search services, and
+names generation tools one by one, so if you use a generation server, expect to
+add its tools yourself from the startup list.
+
+**Confirm** tools (shell, file writes, clicking and typing in your browser) wait
+for an approval card on screen: **Enter** allows, **Escape** declines, and no
+answer within a minute is a no. It's a key press rather than a spoken "yes"
+because JARVIS's own voice, a video, or anyone else in the room can say yes.
+The card shows every argument of the call and says how much it has cut from
+anything too long to show. A browser action also names the site it lands on.
+Decline anything you can't read in full.
+
+Two rules apply whatever the policy says: the browser is only sent to `http`
+and `https` addresses, and file tools refuse network paths (`\\host\share`).
+
+## The leak guard
+
+Reading isn't harmless when the reader can also open addresses. A web page can
+tell the model to read your inbox and then open `https://attacker.example/?d=…`,
+and none of those steps "writes" anything. So the bridge tracks whether private
+data is in the session: your signed-in browser, your files, the camera, or any
+MCP server not listed under `publicServers`. After the first private read, any
+tool call carrying a URL to a host you haven't approved waits for the same
+approval card. That includes the browser, `WebFetch` and anything put on the
+display. Approving a host trusts it for the rest of the session, `www.` or
+not. The HUD shows **PRIVATE · NEW SITES NEED APPROVAL** once something private
+has been read, and a new session starts clean. Hosts in `trustedHosts` or
+`JARVIS_TRUSTED_HOSTS` never ask.
+
+**Ask before every new site.** With `"askBeforeNewSites": "always"` (the
+default), the card comes before every site JARVIS hasn't reached yet in the
+session, private read or not, so a page can't send your signed-in browser to a
+link that does something. Before anything private is read the card asks
+**Reach this site?**; after, **Send to this site?**. Set it to
+`"afterPrivateRead"` to ask only once private data is in.
+
+**Redirects are checked too.**
+- **Built-in fetch:** a redirect to another site comes back as a new request
+  for that site, with its own card.
+- **Bridge fetches** (the display's images, video and pages, and `probe_url`):
+  every redirect hop to another site is judged like the address it leads to.
+  An approved site that redirects somewhere unapproved is refused while private
+  data is in the session.
+- **Your browser** follows redirects itself, so a redirect can't be stopped
+  mid-flight. JARVIS is told where the tab really landed, and clicking or typing
+  there names that site on its card.
+
+At startup the bridge lists every tool the policy would refuse. Servers that
+connect late are checked about twenty seconds later.
+
+What the guard does not cover, so you can decide what to connect:
+
+- **A browser redirect has already happened by the time JARVIS sees it.** If an
+  approved site redirects the browser elsewhere, the request to the new site
+  has been made.
+- **Trust is per host, for the session.** Approving a host that carries other
+  people's content (a paste site, a form service, a file share) opens it for
+  anything later in that session. Don't put such hosts in `trustedHosts`.
+- **Public servers still receive what the model sends them.** A search query or
+  a prompt to another model can contain something private. The guard catches an
+  address written in those arguments, not one described in words for a
+  research tool to follow.
+- **Anything served from this machine's own dev ports can open a session.**
+  The bridge accepts a page on `localhost:5173-5199` or `4173-4199` as the
+  interface, and whoever is the interface answers the cards. Don't run code you
+  don't trust on those ports while the bridge is up.
+- **Once private data is in, some things on the display stop loading** until
+  you approve their host: images in an article that live on a different host
+  from the article, and a video that was already playing.
 
 ## Enabling actions
 
 The tool gate starts **read-only**. Search, generation and lookups run freely;
-anything effectful — send, tap, delete, install, pay — is denied. Voice is a poor
-interface for a confirmation dialog, so the decision is made ahead of time, in
-`decideTool()` in `bridge/policy.mjs`. The bridge sets
+anything in the policy's confirm tier is denied outright. The bridge sets
 `settingSources: []`, which makes its own gate the only authority — filesystem
 settings and any global `bypassPermissions` cannot override it.
 
@@ -300,7 +398,7 @@ PowerShell too. With `npm start`, use `npm start -- --writes`. Writes add `Bash`
 `Write`, `Edit` and `NotebookEdit` to the agent's tools. The file tools stay
 inside the same folders; the shell can reach anything your user account can.
 
-> Read `decideTool()` before you do. *"Hey Jarvis, clean up my downloads folder"*
+> Read your policy file before you do. *"Hey Jarvis, clean up my downloads folder"*
 > means something rather different with writes enabled.
 
 ---
@@ -354,7 +452,8 @@ The bridge's defences live in `bridge/server.mjs` and `bridge/policy.mjs`:
   `JARVIS_ALLOWED_ORIGINS`).
 - `/file`, `/img` and `/media` validate the scheme, confine to allowed roots,
   resolve the real path, and refuse private and loopback addresses (SSRF guard).
-- The tool gate (`decideTool`) is default-deny for effectful MCP tools.
+- The tool policy is an explicit list: unlisted tools are denied, and acting tools wait for an on-screen approval.
+- The leak guard holds back any URL to an unapproved host once private data is in the session.
 - A `PreToolUse` hook enforces the tool policy on every call. File tools stay
   inside the workspace, the temp directory and `JARVIS_FILE_ROOTS`, and
   `WebFetch` cannot reach loopback, LAN or cloud metadata addresses.
