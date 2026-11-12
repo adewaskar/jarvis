@@ -6,7 +6,7 @@ searches the web, generates images, drives your phone, reads your mail. The face
 is a web page (React + Vite + Three.js + custom GLSL). The brain is Claude Code,
 run headless as a library.
 
-**The only subscription you need is Claude Code.** No API keys, no OpenAI
+**For the default backend, the only subscription you need is Claude Code.** No API keys, no OpenAI
 account, no cloud bill — the brain runs on your existing Claude Code login, and
 the heavy work (the model itself) runs on Anthropic's servers, so even a low-end
 laptop only has to draw the interface. **ElevenLabs is an optional add-on** that
@@ -79,6 +79,88 @@ Click **INITIALISE**, allow the microphone when asked, and say **"Hey Jarvis"**.
 
 > It has to be a real browser window. Embedded preview panes block the
 > microphone, so JARVIS will look perfectly alive and simply never respond.
+
+### Local Multica voice pilot
+
+The optional Multica backend sends each English transcript to one preselected
+Multica issue and reads the assigned agent's correlated final comment aloud.
+It is an asynchronous agent-task pilot, not a low-latency chat API: a turn can
+spend substantial time queued or running. Turns are sequential and
+push-to-talk; in this mode the wake word is disabled and the HUD asks you to
+hold Space for each turn.
+
+Use a normal local Multica user profile. Create a dedicated pilot issue in
+advance, assign it to the one agent you want to hear from, and record its issue,
+workspace and agent UUIDs. Do not use an intake/build issue, the Orchestrator by
+default, or credentials injected into a managed agent task. The bridge never
+creates an issue or changes its assignment.
+
+Set server variables in the shell that starts the bridge:
+
+```bash
+export JARVIS_BACKEND=multica
+export JARVIS_MULTICA_PROFILE=your-local-profile
+export JARVIS_MULTICA_ISSUE_ID=your-dedicated-pilot-issue-uuid
+export JARVIS_MULTICA_WORKSPACE_ID=the-expected-workspace-uuid
+export JARVIS_MULTICA_AGENT_ID=the-selected-agent-uuid
+export JARVIS_MULTICA_CLI=/absolute/path/to/multica
+export JARVIS_MULTICA_TIMEOUT_MS=180000
+npm run bridge
+```
+
+Set only the non-secret browser choice in `.env.local`, then start Vite:
+
+```text
+VITE_BACKEND=multica
+VITE_BRIDGE_IDLE_TIMEOUT_MS=210000
+```
+
+The bridge validates the issue's workspace and assignee before listening. It
+runs the fixed CLI executable with argument arrays and `--profile`; transcripts
+never enter shell code, and profile credentials never enter Vite or the
+browser. The default 180-second server timeout is a safety bound, not an SLA.
+
+The adapter keeps a private, dependency-free JSON outbox under
+`~/.jarvis/multica` (override with `JARVIS_MULTICA_STATE_DIR`). Writes are
+atomic and user-only. A transcript exists in a private body file only until
+submission is resolved; C/T/R ids, the previous response id, cancellation and
+playback acknowledgement remain for deduplication. If submission fails
+ambiguously, the adapter searches for its embedded UUID marker. It never sends
+the comment again unless it can prove the first send did not happen. An
+unresolved send blocks later turns for manual inspection. After a bridge crash,
+registered responses are not replayed; an unfinished submitted task is also
+left blocked rather than guessed at. This is best-effort single-process
+deduplication, not exactly-once delivery.
+
+#### Text-only live pilot before audio
+
+Run this only when the dedicated profile and pilot target above are available.
+Do not substitute a managed task credential or this repository's build issue.
+
+1. Start the bridge and confirm its read-only startup validation succeeds.
+2. Send a short text turn through the WebSocket/UI and record timestamps for
+   transcript end, comment `C1`, task `T1`, response `R1`, task completion and
+   first output. Record ids/status/timing only—never transcript or response
+   text, audio, credentials, or raw CLI output.
+3. Verify `T1.trigger_comment_id=C1`, `R1.source_task_id=T1`, and exactly one
+   final response was presented.
+4. Send turn 2 and verify its comment uses `--parent R1`, while its independent
+   `C2/T2/R2` correlation remains exact.
+5. Continue through 10 sequential turns. For every turn, verify no second turn
+   is accepted while one is active, no stale comment is presented, and no
+   response is presented twice.
+6. Calculate observed queue, response, completion and end-to-first-output
+   latency from those content-free timestamps. Report raw observations; do not
+   describe them as an SLA or as proof of conversational latency.
+7. Exercise one interrupt and one timeout. Confirm only the current known task
+   receives at most one cancellation and any later response is suppressed.
+8. Only after all 10 text turns pass, open Chrome/Edge, click INITIALISE, hold
+   Space, speak English, and confirm the same final response is spoken once by
+   the browser voice without a Claude session or ElevenLabs key.
+
+If microphone, audio device or real-browser access is unavailable, stop after
+the text fixture/live checks and record the browser smoke as outstanding rather
+than inferring a result.
 
 ---
 
@@ -230,6 +312,14 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 |---|---|---|
 | `JARVIS_BRIDGE_PORT` | `8787` | Port for the WebSocket + HTTP endpoints |
 | `JARVIS_BRIDGE_HOST` | `127.0.0.1` | Interface to listen on. Any other address puts the agent on your network |
+| `JARVIS_BACKEND` | `claude` | `claude` preserves the SDK backend; `multica` enables the local issue adapter |
+| `JARVIS_MULTICA_PROFILE` | none | Required Multica CLI profile in Multica mode |
+| `JARVIS_MULTICA_ISSUE_ID` | none | Required dedicated pilot issue UUID |
+| `JARVIS_MULTICA_WORKSPACE_ID` | none | Required expected workspace UUID |
+| `JARVIS_MULTICA_AGENT_ID` | none | Required expected assignee UUID |
+| `JARVIS_MULTICA_CLI` | `multica` | Fixed CLI executable; an absolute path is recommended |
+| `JARVIS_MULTICA_TIMEOUT_MS` | `180000` | Whole-turn safety timeout, not a latency target |
+| `JARVIS_MULTICA_STATE_DIR` | `~/.jarvis/multica` | Private persistent outbox/correlation state |
 | `JARVIS_ALLOWED_HOSTS` | none | Extra hostnames the bridge answers to; a request for any other name gets a 403 |
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
 | `JARVIS_EFFORT` | `medium` | Reasoning effort |
@@ -252,8 +342,9 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 
 | Variable | Effect |
 |---|---|
-| `VITE_BACKEND` | `bridge` (default) or `direct` |
+| `VITE_BACKEND` | `bridge` (default), `multica`, or `direct` |
 | `VITE_BRIDGE_URL` | Where to reach the bridge |
+| `VITE_BRIDGE_IDLE_TIMEOUT_MS` | Quiet-turn limit; defaults to 210s in Multica mode, otherwise 120s |
 | `VITE_TTS_ENGINE` | `system` or `kokoro` |
 | `VITE_KOKORO_VOICE` | Voice for the Kokoro engine |
 | `VITE_USE_ELEVENLABS` | Force the ElevenLabs voice on |
@@ -341,6 +432,12 @@ not forward it.
 network binding, the tool policy, the MCP server allowlist and the WSL browser
 relay, which runs only under WSL. The network and allowlist tests start the
 bridge on a random loopback port, and none of the tests opens an agent session.
+The Multica adapter tests use a fake CLI fixture: they cover sequential C/T/R
+correlation, wrong-turn filtering, delayed visibility, terminal failures,
+ambiguous submission reconciliation, persistent playback acknowledgement,
+timeouts and interruption before a task id is visible. They do not call a live
+Multica agent. The browser voice smoke and the 10-turn live procedure above are
+separate manual validations.
 
 ---
 

@@ -46,6 +46,15 @@ function flag(name: string, raw: unknown, fallback: boolean): boolean {
   return fallback
 }
 
+function positiveInteger(name: string, raw: unknown, fallback: number): number {
+  const value = str(raw)
+  if (value === undefined) return fallback
+  const parsed = Number(value)
+  if (Number.isSafeInteger(parsed) && parsed > 0) return parsed
+  console.warn(`[jarvis] ${name}="${value}" is not a positive integer — using ${fallback}.`)
+  return fallback
+}
+
 /**
  * Which brain to use.
  *
@@ -54,16 +63,21 @@ function flag(name: string, raw: unknown, fallback: boolean): boolean {
  *              your Claude Code config is available to JARVIS, including local
  *              ones like higgsfield, elevenlabs, android and playwright.
  *
+ *   'multica' — use the local bridge's configured Multica issue/agent adapter.
+ *               The profile, issue and agent identifiers stay server-side.
+ *
  *   'direct' — the browser calls the Claude API itself. Nothing to run and it
  *              deploys as a static site, but it needs VITE_ANTHROPIC_API_KEY in
  *              the bundle and only reaches remote HTTP MCP servers.
  */
-export const BACKEND: 'bridge' | 'direct' = choice(
+export const BACKEND: 'bridge' | 'multica' | 'direct' = choice(
   'VITE_BACKEND',
   import.meta.env.VITE_BACKEND,
-  ['bridge', 'direct'] as const,
+  ['bridge', 'multica', 'direct'] as const,
   'bridge',
 )
+
+export const MULTICA_MODE = BACKEND === 'multica'
 
 /**
  * Where the bridge lives. Derived once here rather than in each of the three
@@ -73,6 +87,11 @@ export const BACKEND: 'bridge' | 'direct' = choice(
  */
 export const BRIDGE_WS_URL = str(import.meta.env.VITE_BRIDGE_URL) ?? 'ws://localhost:8787'
 export const BRIDGE_HTTP_URL = BRIDGE_WS_URL.replace(/^ws/, 'http')
+export const BRIDGE_IDLE_TIMEOUT_MS = positiveInteger(
+  'VITE_BRIDGE_IDLE_TIMEOUT_MS',
+  import.meta.env.VITE_BRIDGE_IDLE_TIMEOUT_MS,
+  MULTICA_MODE ? 210_000 : 120_000,
+)
 
 /**
  * Speech output engine.

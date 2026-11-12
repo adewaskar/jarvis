@@ -1,6 +1,6 @@
 import type { AskHandlers } from './anthropic'
 import type { Blade, Panel } from '../store'
-import { BRIDGE_WS_URL } from '../config'
+import { BRIDGE_IDLE_TIMEOUT_MS, BRIDGE_WS_URL, MULTICA_MODE } from '../config'
 
 /**
  * Client for the local bridge (see bridge/server.mjs).
@@ -35,6 +35,8 @@ type Frame = {
   seconds?: number
   when?: string
   servers?: Array<string | { name?: string }>
+  responseId?: string
+  backend?: string
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
@@ -46,6 +48,7 @@ let connecting: Promise<WebSocket> | null = null
 /** Server names reported by the bridge, for the HUD readout. */
 let servers: string[] = []
 export const bridgeServers = () => servers
+let reportedBackend: string | null = null
 
 /** The list arrives twice — once from config, once with live status — so the
  *  HUD subscribes rather than reading it a single time at boot. */
@@ -175,6 +178,7 @@ function dispatch(ws: WebSocket) {
       servers = (msg.servers ?? [])
         .map((s) => (typeof s === 'string' ? s : (s.name ?? '')))
         .filter(Boolean)
+      reportedBackend = msg.backend ?? 'claude'
       onServers?.(servers)
       firstReady.resolve()
     } else if (msg.type === 'panel' && msg.panel) {
@@ -216,6 +220,7 @@ function connect(): Promise<WebSocket> {
   if (connecting) return connecting
 
   firstReady = deferred()
+  reportedBackend = null
 
   connecting = new Promise<WebSocket>((resolve, reject) => {
     const ws = new WebSocket(BRIDGE_WS_URL)
@@ -296,6 +301,13 @@ export async function warmBridge(): Promise<void> {
     firstReady.promise,
     new Promise<void>((resolve) => setTimeout(resolve, 2500)),
   ])
+  const expected = MULTICA_MODE ? 'multica' : 'claude'
+  if (reportedBackend && reportedBackend !== expected) {
+    throw new Error(
+      `Frontend expects the ${expected} bridge backend, but the server reports ${reportedBackend}. ` +
+        'Set VITE_BACKEND and JARVIS_BACKEND to matching modes.',
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +320,7 @@ export async function warmBridge(): Promise<void> {
  * and cutting a real answer off is worse than waiting. What this catches is
  * the case that used to hang forever — the bridge alive but the turn lost.
  */
-const IDLE_TIMEOUT_MS = 120_000
+const IDLE_TIMEOUT_MS = BRIDGE_IDLE_TIMEOUT_MS
 
 /** The turn in flight, so a barge-in can settle it locally. */
 let pending: { finish: (fallback?: string) => void } | null = null
@@ -316,7 +328,7 @@ let pending: { finish: (fallback?: string) => void } | null = null
 export async function ask(
   prompt: string,
   handlers: AskHandlers,
-): Promise<{ text: string; tools: string[] }> {
+): Promise<{ text: string; tools: string[]; responseId?: string }> {
   /**
    * A new question supersedes the one in flight.
    *
@@ -367,6 +379,7 @@ export async function ask(
   const id = `a${++askSeq}`
   const tools: string[] = []
   let text = ''
+  let responseId: string | undefined
 
   return new Promise((resolve, reject) => {
     let done = false
@@ -386,7 +399,7 @@ export async function ask(
       cleanup()
       // Prefer the streamed text; fall back to the final result if this build
       // didn't emit deltas.
-      resolve({ text: (text || fallback).trim(), tools })
+      resolve({ text: (text || fallback).trim(), tools, responseId })
     }
 
     const fail = (err: Error) => {
@@ -441,6 +454,7 @@ export async function ask(
             break
 
           case 'done':
+            responseId = msg.responseId
             finish(msg.text ?? '')
             break
 
@@ -493,6 +507,12 @@ export function cancel(): void {
 /** The older name for `cancel()`. */
 export function interrupt(): void {
   cancel()
+}
+
+/** Confirm that the browser finished speaking a persisted Multica response. */
+export function acknowledgeResponse(responseId?: string): void {
+  if (!responseId || socket?.readyState !== WebSocket.OPEN) return
+  socket.send(JSON.stringify({ type: 'played', responseId }))
 }
 
 /** `mcp__higgsfield__generate_image` -> `higgsfield · generate image` */

@@ -6,16 +6,17 @@ import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
+import { MULTICA_MODE } from '../config'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
   boot: 'INITIALISING',
-  dormant: 'STANDBY — SAY “HEY JARVIS”',
+  dormant: MULTICA_MODE ? 'STANDBY — HOLD SPACE TO TALK' : 'STANDBY — SAY “HEY JARVIS”',
   waking: 'ONLINE',
   listening: 'LISTENING',
-  thinking: 'PROCESSING',
+  thinking: MULTICA_MODE ? 'WAITING FOR MULTICA' : 'PROCESSING',
   tooling: 'ACCESSING SYSTEMS',
-  speaking: 'RESPONDING',
+  speaking: MULTICA_MODE ? 'COMPLETED · RESPONDING' : 'RESPONDING',
 }
 
 function Corner({ at }: { at: 'tl' | 'tr' | 'bl' | 'br' }) {
