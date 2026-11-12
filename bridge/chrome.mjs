@@ -273,7 +273,7 @@ class ChromeLink {
       const message = { method: 'execute_tool', params: { tool: name, args: args ?? {} } }
       try {
         return await this.request(message)
-      } catch (err) {
+      } catch {
         this.reset()
         return await this.request(message)
       }
