@@ -123,6 +123,8 @@ The loop is designed so that nothing silently dies and barge-in feels natural.
 - **Transcription has two tiers, chosen automatically at boot.** The browser asks
   the bridge `/health` and picks the best available:
   - **ElevenLabs key present** → ElevenLabs Scribe, via the bridge `/stt` endpoint.
+  - **`JARVIS_STT_URL` set** → a transcriber of your own (a local Whisper server,
+    say), via the same `/stt` endpoint. ElevenLabs is never called for the words.
   - **Nothing configured** → the browser's own `SpeechRecognition` (Chrome/Edge),
     guarded by a heartbeat so it recovers when Chrome throttles it.
 - **Speaking** uses the **ElevenLabs voice when a key is present**, and the
@@ -247,6 +249,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_DEBUG` | off | `1` logs every agent message to the bridge terminal, answer text and tool calls included |
 | `JARVIS_VOICE_ID` | none | ElevenLabs voice id |
 | `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe |
+| `JARVIS_STT_URL` | none | A transcriber of your own, used instead of Scribe: an HTTP endpoint that takes the recorded audio as the request body and answers `{ "text": "..." }` |
 
 ### Frontend (`.env.local`)
 

@@ -497,6 +497,14 @@ const SYSTEM_PROMPT = [
  * machine — no reason to make you paste it into a second .env file. The browser
  * never sees it: it POSTs text to /tts here and gets audio back.
  */
+/**
+ * A local transcriber, as an alternative to ElevenLabs Scribe: an HTTP endpoint
+ * that takes the raw recorded audio and answers `{ text }`. When set, /stt uses
+ * it and never calls ElevenLabs, and the browser gets the detector-based
+ * listening path (echo cancellation, instant barge-in) with no key at all.
+ */
+const STT_URL = process.env.JARVIS_STT_URL || ''
+
 function elevenKey() {
   if (process.env.ELEVENLABS_API_KEY) return process.env.ELEVENLABS_API_KEY
   try {
@@ -739,10 +747,11 @@ const handleRequest = async (req, res) => {
     // Both premium paths ride the same ElevenLabs key, so both flags track it:
     // with a key the app transcribes with Scribe and speaks with ElevenLabs;
     // without one it falls back to the browser's own recogniser and voice, so a
-    // student with nothing configured still has a working assistant.
+    // student with nothing configured still has a working assistant. A local
+    // transcriber (JARVIS_STT_URL) turns on the listening half by itself.
     const eleven = Boolean(elevenKey())
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
-    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven }))
+    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven || Boolean(STT_URL) }))
   }
 
   // Serve local image files to the page. Screenshots and generated art land on
@@ -950,8 +959,8 @@ const handleRequest = async (req, res) => {
   // speaking at all is done locally with voice-activity detection, which never
   // touches this endpoint; this is only for the words.
   if (req.method === 'POST' && req.url === '/stt') {
-    const key = elevenKey()
-    if (!key) {
+    const key = STT_URL ? null : elevenKey()
+    if (!key && !STT_URL) {
       res.writeHead(503, cors)
       return res.end('no elevenlabs key')
     }
@@ -980,6 +989,27 @@ const handleRequest = async (req, res) => {
     if (size < 1200) {
       res.writeHead(200, { ...cors, 'content-type': 'application/json' })
       return res.end(JSON.stringify({ text: '' }))
+    }
+
+    if (STT_URL) {
+      try {
+        const local = await fetch(STT_URL, {
+          method: 'POST',
+          headers: { 'content-type': type },
+          body: Buffer.concat(chunks),
+          signal: AbortSignal.timeout(30000),
+        })
+        if (!local.ok) {
+          res.writeHead(local.status, cors)
+          return res.end(await local.text())
+        }
+        const data = await local.json()
+        res.writeHead(200, { ...cors, 'content-type': 'application/json' })
+        return res.end(JSON.stringify({ text: String(data.text ?? '').trim() }))
+      } catch (err) {
+        res.writeHead(502, cors)
+        return res.end(String(err?.message ?? err))
+      }
     }
 
     try {
@@ -1086,6 +1116,7 @@ if (!LOOPBACK) {
 console.log(
   `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
 )
+if (STT_URL) console.log(`[jarvis] transcription via local service at ${STT_URL}`)
 console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
 console.log(
   `[jarvis] MCP servers from config: ${Object.keys(MCP_SERVERS).join(', ') || 'none'}` +

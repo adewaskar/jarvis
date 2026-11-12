@@ -420,8 +420,21 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
    * Order is preserved because the drain is single-flight, which matters —
    * "London" arriving before "what's the weather in" is worse than either.
    */
-  const pendingAudio: Blob[] = []
+  const pendingAudio: { blob: Blob; spoken: string }[] = []
   let draining = false
+  /**
+   * What he was saying while the current segment was being captured.
+   *
+   * The echo check used to ask what he was saying when the transcript came
+   * back, and that memory only lasts ECHO_TAIL_MS. A transcriber slower than
+   * that — a local one easily is — returned his own sentence after it had been
+   * forgotten, and it was taken as something the user said.
+   */
+  let spokenDuring = ''
+  const noteSpoken = () => {
+    const now = speakingNow()
+    if (now && !spokenDuring.includes(now)) spokenDuring += ` ${now}`
+  }
 
   /**
    * Transcripts become turns here rather than one-per-segment.
@@ -445,7 +458,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
    * transcript arriving — and the transcript belongs to the mode the user is in
    * now, not the one they interrupted.
    */
-  const transcribe = async (blob: Blob) => {
+  const transcribe = async ({ blob, spoken }: { blob: Blob; spoken: string }) => {
     const mode = h.mode()
     if (mode === 'deaf') return
     const t0 = performance.now()
@@ -473,7 +486,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
 
       // His own voice, come back through the microphone. The raised guard
       // threshold stops most of it at the door; this catches the rest.
-      if (isEcho(said, speakingNow())) {
+      if (isEcho(said, `${spoken} ${speakingNow()}`.trim())) {
         drop('echo of his own voice')
         return
       }
@@ -522,6 +535,8 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       const mode = h.mode()
       diag.mode = mode
       diag.sessions++
+      spokenDuring = ''
+      noteSpoken()
       if (mode === 'deaf') return
       // Standing down mid-thought throws the thought away with it. Otherwise
       // held text would surface as the opening of the *next* conversation.
@@ -539,7 +554,8 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       }
     },
     onEnd: (blob) => {
-      pendingAudio.push(blob)
+      noteSpoken()
+      pendingAudio.push({ blob, spoken: spokenDuring.trim() })
       void drain()
     },
     onLevel: (v) => {
@@ -567,6 +583,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
   const guardPoll = setInterval(() => {
     const mode = h.mode()
     vad?.setGuard(mode === 'guard')
+    if (vad?.meter().speaking) noteSpoken()
     // He has stood down — by Escape, by the idle timeout, or by dropping back
     // to the wake word. Anything half-said belonged to a conversation that is
     // over, and letting the hold expire later would open the next one with a
