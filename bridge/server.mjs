@@ -25,11 +25,15 @@ import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
-import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
+import { openRemote, proxyError, setRedirectCheck, vetTarget, PROXY_UA } from './net.mjs'
 import { probeUrl, renderPage } from './page.mjs'
 import { builtinTools, fileRoots, isListed, isNetworkPath, loadPolicy, tierOf } from './policy.mjs'
-import { LeakGuard, registerGuard, remoteBlocked, unregisterGuard } from './guard.mjs'
+import { LeakGuard, redirectBlocked, registerGuard, remoteBlocked, unregisterGuard } from './guard.mjs'
 import { createEnforcer } from './enforce.mjs'
+import { agentEnv, loadPrivateEnv } from './secrets.mjs'
+
+// Before anything below reads process.env. See secrets.mjs.
+const ENV_FILE = loadPrivateEnv()
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
 
@@ -274,7 +278,16 @@ try {
   console.error(`[jarvis] ${err.message}`)
   process.exit(1)
 }
-console.log(`[jarvis] tool policy ${POLICY.path}`)
+console.log(
+  `[jarvis] tool policy ${POLICY.path} · ` +
+    (POLICY.askBeforeNewSites === 'always'
+      ? 'asks before every new site'
+      : 'asks before new sites once private data is read'),
+)
+
+// Every redirect the bridge follows for the display or probe_url is judged by
+// the leak guard too, not only the address it started from.
+setRedirectCheck(redirectBlocked)
 
 /**
  * Hosts JARVIS may reach after private data is in the conversation, without
@@ -516,23 +529,31 @@ const SYSTEM_PROMPT = [
 ].join('')
 
 /**
- * ElevenLabs credentials, borrowed from the MCP server config.
- *
- * If you've set up the elevenlabs MCP server, the key is already on this
- * machine — no reason to make you paste it into a second .env file. The browser
- * never sees it: it POSTs text to /tts here and gets audio back.
+ * ElevenLabs credentials: ELEVENLABS_API_KEY (from the shell or ~/.jarvis/.env),
+ * else the key in the elevenlabs MCP server's config, so a key already on this
+ * machine need not be pasted twice. The browser never sees it: it POSTs text to
+ * /tts here and gets audio back. Nor does the agent — see agentEnv.
  */
-function elevenKey() {
-  if (process.env.ELEVENLABS_API_KEY) return process.env.ELEVENLABS_API_KEY
+function elevenKeySource() {
+  if (process.env.ELEVENLABS_API_KEY) {
+    return { key: process.env.ELEVENLABS_API_KEY, from: ENV_FILE ? ENV_FILE : 'the environment' }
+  }
   try {
-    const cfg = JSON.parse(
-      readFileSync(join(homedir(), '.claude.json'), 'utf8'),
-    )
-    return cfg.mcpServers?.elevenlabs?.env?.ELEVENLABS_API_KEY ?? null
+    const cfg = JSON.parse(readFileSync(join(homedir(), '.claude.json'), 'utf8'))
+    const key = cfg.mcpServers?.elevenlabs?.env?.ELEVENLABS_API_KEY
+    return key ? { key, from: 'the elevenlabs MCP server config' } : null
   } catch {
     return null
   }
 }
+const elevenKey = () => elevenKeySource()?.key ?? null
+
+/**
+ * The text-to-speech model. Flash answers fastest, which is what a
+ * conversation needs; eleven_turbo_v2_5 or eleven_multilingual_v2 sound richer
+ * and take longer to start.
+ */
+const TTS_MODEL = process.env.JARVIS_TTS_MODEL || 'eleven_flash_v2_5'
 
 const VOICE_ID = process.env.JARVIS_VOICE_ID ?? 'JBFqnCBsd6RMkjVDRZzb'
 
@@ -955,9 +976,9 @@ const handleRequest = async (req, res) => {
           headers: { 'xi-api-key': key, 'content-type': 'application/json' },
           body: JSON.stringify({
             text,
-            // Flash is the low-latency model — a conversation needs speed more
-            // than it needs the last few percent of quality.
-            model_id: 'eleven_flash_v2_5',
+            // Flash by default: a conversation needs speed more than it needs
+            // the last few percent of quality. See TTS_MODEL.
+            model_id: TTS_MODEL,
             voice_settings: {
               stability: 0.4,
               similarity_boost: 0.75,
@@ -1127,9 +1148,15 @@ if (!LOOPBACK) {
     `[jarvis] WARNING: listening on ${HOST}, not loopback — other machines on this network can reach the bridge`,
   )
 }
-console.log(
-  `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
-)
+{
+  // Says where the key came from, never what it is.
+  const source = elevenKeySource()
+  console.log(
+    source
+      ? `[jarvis] speech via ElevenLabs · voice ${VOICE_ID} · ${TTS_MODEL} · key from ${source.from}`
+      : '[jarvis] speech using browser fallback voice (no ElevenLabs key; see ~/.jarvis/.env in the README)',
+  )
+}
 console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
 console.log(
   `[jarvis] MCP servers from config: ${Object.keys(MCP_SERVERS).join(', ') || 'none'}` +
@@ -1168,6 +1195,31 @@ const RESULT_FAILURES = {
   error_max_budget_usd: 'The budget for this turn ran out.',
   error_max_structured_output_retries: 'The answer could not be assembled.',
   default: 'The turn ended without an answer.',
+}
+
+/**
+ * The tools of servers that were still connecting when the session started,
+ * checked against the policy. Without this, a lazily connecting server's tools
+ * would be refused without the startup log ever naming them.
+ */
+let lateCheckDone = false
+async function reportLateTools(session, seen) {
+  try {
+    const status = await session.mcpServerStatus()
+    const late = status
+      .flatMap((s) => (s.tools ?? []).map((t) => `mcp__${s.name}__${t.name}`))
+      .filter((t) => !seen.has(t) && !isListed(t, POLICY))
+    const still = status.filter((s) => s.status === 'pending').map((s) => s.name)
+    if (late.length) {
+      console.log(
+        `[jarvis] ${late.length} more tools, from servers that connected late, are not in the policy and will be refused:\n  ` +
+          late.join('\n  '),
+      )
+    }
+    if (still.length) console.log(`[jarvis] still connecting, not checked: ${still.join(', ')}`)
+  } catch {
+    /* the session closed first; nothing to report */
+  }
 }
 
 wss.on('connection', (socket) => {
@@ -1263,6 +1315,7 @@ wss.on('connection', (socket) => {
     // The bridge's own endpoints, which panels refer to by address. Every
     // other port on this machine is somebody else's service.
     ownPorts: [PORT],
+    askAlways: POLICY.askBeforeNewSites === 'always',
   })
   registerGuard(guard)
 
@@ -1475,6 +1528,10 @@ wss.on('connection', (socket) => {
       // camera frame as base64) in ~/.claude/projects, beside your own Claude
       // Code history and listed by `claude --resume`. Off unless asked for.
       persistSession: process.env.JARVIS_KEEP_TRANSCRIPTS === '1',
+      // The agent's environment, without the keys only the bridge needs.
+      // Left to its default the CLI inherits all of process.env, and its
+      // shell tool can print any of it. See secrets.mjs.
+      env: agentEnv(),
       // Run the agent through something else — typically a sandbox wrapper
       // (bubblewrap, firejail, sandbox-exec) that execs the real CLI with the
       // arguments it was given. The SDK's bundled CLI is used when unset.
@@ -1636,6 +1693,15 @@ wss.on('connection', (socket) => {
                   `[jarvis] ${unlisted.length} tools are not in the policy and will be refused:\n  ` +
                     unlisted.join('\n  '),
                 )
+              } else if (Array.isArray(msg.tools)) {
+                console.log(`[jarvis] all ${msg.tools.length} tools are in the policy`)
+              }
+              // Servers that connect lazily report "pending" here and bring
+              // their tools later, so check those once more after they've had
+              // time to arrive. Once per bridge process is enough.
+              if (!lateCheckDone && (msg.mcp_servers ?? []).some((s) => s.status === 'pending')) {
+                lateCheckDone = true
+                setTimeout(() => void reportLateTools(session, new Set(msg.tools ?? [])), 20_000)
               }
             }
             break

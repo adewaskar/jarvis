@@ -68,6 +68,9 @@ export function compilePolicy(raw = {}) {
     deny: strings(raw.deny).map(pattern),
     publicServers: new Set(strings(raw.publicServers)),
     trustedHosts: strings(raw.trustedHosts),
+    // 'always' asks before every new site from the first call; anything else
+    // asks only once private data is in the conversation.
+    askBeforeNewSites: raw.askBeforeNewSites === 'always' ? 'always' : 'afterPrivateRead',
   }
 }
 
@@ -245,6 +248,13 @@ export function pathProblem(target, { cwd, roots }) {
     if (SECRET_DIRS.some((d) => rel === d || rel.startsWith(d + '/'))) {
       return `${target} holds credentials`
     }
+    // The rules JARVIS runs under. Off limits even if JARVIS_FILE_ROOTS
+    // widens the roots to home: an agent that can edit its own policy has none.
+    if (rel === '.jarvis/policy.json') return `${target} is JARVIS's own policy`
+  }
+  const policyFile = process.env.JARVIS_POLICY
+  if (policyFile && resolveReal(resolvePath(policyFile)) === real) {
+    return `${target} is JARVIS's own policy`
   }
   if (SECRET_FILES.test(basename(real))) return `${target} holds credentials`
   return null

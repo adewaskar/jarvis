@@ -161,19 +161,24 @@ export function createEnforcer({
         const action = [where, detail].filter(Boolean).join('\n')
         const hosts = leaving.map((d) => d.host ?? 'an address that cannot be read')
         const addresses = leaving.map((d) => d.href).join('\n')
+        const sites = [...new Set(hosts)].join(', ')
+        // Two different questions. With private data in, the risk is sending
+        // it; before that, the question is only whether to go there at all.
         const card = leaving.length
           ? {
-              kind: 'leak',
-              title: `Send to ${[...new Set(hosts)].join(', ')}?`,
+              kind: guard.holdsPrivate ? 'leak' : 'site',
+              title: guard.holdsPrivate ? `Send to ${sites}?` : `Reach ${sites}?`,
               tool,
               // An acting tool shows what it would do as well as where to: a
               // shell command that happens to contain an address is still a
               // shell command, and the address alone would hide the rest of it.
               detail: verdict.verdict === 'confirm' ? `${action}\n\n${addresses}` : addresses,
-              note:
-                'Private information is in this conversation, and this would send a' +
-                ' request to a site you have not approved. Approving trusts that' +
-                ' site for the rest of the session.',
+              note: guard.holdsPrivate
+                ? 'Private information is in this conversation, and this would send a' +
+                  ' request to a site you have not approved. Approving trusts that' +
+                  ' site for the rest of the session.'
+                : 'JARVIS has not been to this site in this session. Approving lets' +
+                  ' it reach the site for the rest of the session.',
             }
           : { kind: 'action', title: 'Allow this action?', tool, detail: action, note: '' }
         let ok = false

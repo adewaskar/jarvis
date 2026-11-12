@@ -5,8 +5,10 @@
     "Prefer exact names. A pattern like mcp__x__get* also admits get_or_delete, which is the guessing-from-names this file replaces. The whole-server entries below are search services whose every tool is a lookup; list the tools of anything else one by one.",
     "confirm: the action waits for you to press Enter on screen. Without --writes those tools are refused outright.",
     "publicServers: MCP servers whose results are public (search, generation). Every other server's results count as private and switch on the leak guard.",
-    "trustedHosts: hosts JARVIS may reach even after private data is in the conversation. Subdomains are included."
+    "trustedHosts: hosts JARVIS may reach without asking, even after private data is in the conversation. Subdomains are included. Never list a host that carries other people's content (paste sites, form services, file shares).",
+    "askBeforeNewSites: \"always\" asks before every site JARVIS has not reached yet in this session, from the first call. \"afterPrivateRead\" asks only once something private has been read. An approval lasts for the session."
   ],
+  "askBeforeNewSites": "always",
   "allow": [
     "Read",
     "Glob",

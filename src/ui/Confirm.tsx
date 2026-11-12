@@ -118,7 +118,11 @@ export function Confirm() {
       {current && (
         <div className={`confirm confirm-${current.kind}`} role="alertdialog" aria-label={current.title}>
           <div className="confirm-head">
-            {current.kind === 'leak' ? 'PRIVATE DATA · APPROVAL NEEDED' : 'APPROVAL NEEDED'}
+            {current.kind === 'leak'
+              ? 'PRIVATE DATA · APPROVAL NEEDED'
+              : current.kind === 'site'
+                ? 'NEW SITE · APPROVAL NEEDED'
+                : 'APPROVAL NEEDED'}
             {queue.length > 1 && <span className="confirm-more"> · {queue.length - 1} more</span>}
           </div>
           <div className="confirm-title">{current.title}</div>

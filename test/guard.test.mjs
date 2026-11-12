@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   LeakGuard,
+  redirectBlocked,
   destinationsIn,
   isPrivateRead,
   registerGuard,
@@ -210,4 +211,39 @@ test('the display endpoints apply the same rule', () => {
     unregisterGuard(g)
   }
   assert.equal(remoteBlocked('https://attacker.example/x.png'), null)
+})
+
+test('asking before every new site, from the first call', () => {
+  const g = new LeakGuard({ askAlways: true, ownPorts: [8787] })
+  assert.equal(g.tainted, true)
+  assert.equal(g.holdsPrivate, false)
+  // A page can no longer send the browser anywhere unasked, private read or not.
+  assert.equal(g.pending(NAV, { url: 'https://mail.example/delete?id=1' }).length, 1)
+  // Approval covers the site for the session, www. or not.
+  g.approve(g.pending(NAV, { url: 'https://news.example/a' }))
+  assert.deepEqual(g.pending(NAV, { url: 'https://www.news.example/b' }), [])
+  assert.deepEqual(g.pending(NAV, { url: 'https://news.example/c' }), [])
+  // The PRIVATE notice still means private: only a real private read sets it.
+  assert.equal(g.note('WebFetch'), false)
+  assert.equal(g.note('Read'), true)
+  assert.equal(g.holdsPrivate, true)
+})
+
+test('redirects are judged like the address they lead to', () => {
+  const g = fresh()
+  registerGuard(g)
+  try {
+    // Clean session: nothing to leak, so nothing is held.
+    assert.equal(redirectBlocked('https://approved.example/r', 'https://attacker.example/'), null)
+    g.note('Read')
+    g.approve([{ host: 'approved.example', port: '443' }])
+    // Same site, any spelling: fine.
+    assert.equal(redirectBlocked('http://approved.example/a', 'https://www.approved.example/b'), null)
+    // An approved site that redirects somewhere else does not vouch for it.
+    assert.match(redirectBlocked('https://approved.example/r?to=x', 'https://attacker.example/c?d=1'), /redirected to/)
+    g.approve([{ host: 'cdn.example', port: '443' }])
+    assert.equal(redirectBlocked('https://approved.example/img', 'https://cdn.example/a.png'), null)
+  } finally {
+    unregisterGuard(g)
+  }
 })

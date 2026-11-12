@@ -558,21 +558,34 @@ function samePage(a, b) {
   }
 }
 
+/** Returns the address the tab ended up on, or null if it never said. */
 async function settle(tab, target) {
+  let last = null
   for (let i = 0; i < SETTLE_TRIES; i++) {
     let reply
     try {
       reply = await link.call('get_page_text', { tabId: tab, max_chars: 200 })
     } catch {
-      return // the browser went away; the caller's own error path will say so
+      return last // the browser went away; the caller's own error path will say so
     }
     const blocks = reply?.result?.content
     const text = Array.isArray(blocks)
       ? blocks.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('\n')
       : ''
     const at = /^URL:\s*(\S+)/m.exec(text)
-    if (at && samePage(at[1], target)) return
+    if (at) last = at[1]
+    if (at && samePage(at[1], target)) return last
     await new Promise((r) => setTimeout(r, SETTLE_GAP_MS))
+  }
+  return last
+}
+
+/** The site part of an address, without www., or null. */
+const siteOf = (u) => {
+  try {
+    return new URL(u).hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return null
   }
 }
 
@@ -745,7 +758,17 @@ export function chromeServer({ allowWrites }) {
         // wrong if it runs against the document this one replaced.
         const url = String(args.url ?? '')
         if (/^https?:\/\//i.test(url)) {
-          await settle(await resolveTab(args.tabId), url)
+          const landed = await settle(await resolveTab(args.tabId), url)
+          // The browser follows redirects itself, so the bridge cannot stop
+          // one mid-flight. What it can do is say where the tab really is:
+          // anything done on that page next is judged against that site
+          // (clicks and typing name it on their approval card).
+          if (landed && siteOf(landed) && siteOf(url) && siteOf(landed) !== siteOf(url)) {
+            const note =
+              `The page redirected to ${siteOf(landed)}, which is not the site that was asked for.` +
+              ' Tell the user where it landed before doing anything on it.'
+            return { ...out, content: [...(out.content ?? []), { type: 'text', text: note }] }
+          }
         } else {
           // back / forward: no target to compare against, so just let it breathe.
           await new Promise((r) => setTimeout(r, 700))

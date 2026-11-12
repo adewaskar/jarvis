@@ -233,3 +233,30 @@ test('nothing is looked up for an address until the user has approved it', async
   await yes.call('WebFetch', { url: 'https://docs.example/' })
   assert.deepEqual(order, ['card', 'dns-after-yes'])
 })
+
+test('a new-site card before any private read says so, and a private one says that', async () => {
+  const cards = []
+  const guard = new LeakGuard({ askAlways: true, ownPorts: [8787] })
+  const enforcer = createEnforcer({
+    policy,
+    allowWrites: true,
+    cwd: workspace,
+    roots: fileRoots({ workspace }),
+    guard,
+    confirm: async (card) => (cards.push(card), true),
+    resolveFetch: async () => null,
+  })
+  let n = 0
+  const call = (tool_name, tool_input) =>
+    enforcer.hook({ tool_name, tool_input, tool_use_id: `t${++n}` }, `t${n}`, {})
+  await call('WebFetch', { url: 'https://news.example/' })
+  assert.equal(cards[0].kind, 'site')
+  assert.match(cards[0].title, /^Reach news\.example/)
+  // Approved for the session: no second card for the same site.
+  await call('WebFetch', { url: 'https://news.example/other' })
+  assert.equal(cards.length, 1)
+  await call('Read', { file_path: join(workspace, 'note.txt') })
+  await call('WebFetch', { url: 'https://other.example/' })
+  assert.equal(cards[1].kind, 'leak')
+  assert.match(cards[1].title, /^Send to other\.example/)
+})

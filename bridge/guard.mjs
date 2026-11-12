@@ -267,22 +267,34 @@ export class LeakGuard {
    * otherwise treated like any other host: a workflow tool or a dev server
    * listening on this machine can pass a request on as well as a remote one.
    */
-  constructor({ trustedHosts = [], publicServers = new Set(), ownPorts = [] } = {}) {
+  constructor({ trustedHosts = [], publicServers = new Set(), ownPorts = [], askAlways = false } = {}) {
     this.trusted = trustedHosts.map(trustedEntry).filter(Boolean)
     this.publicServers = publicServers
     this.ownPorts = new Set([...ownPorts].map(String))
     this.approved = new Set()
+    /**
+     * Ask before every new site from the first call, not only once private
+     * data is in. Closes the gap where a page sends the signed-in browser to a
+     * link that does something before anything private has been read.
+     */
+    this.askAlways = askAlways
     /** The tool that first brought private data in, or null while clean. */
     this.taintedBy = null
   }
 
+  /** Whether new sites need approval right now. */
   get tainted() {
+    return this.askAlways || this.taintedBy !== null
+  }
+
+  /** Whether private data is actually in the conversation. */
+  get holdsPrivate() {
     return this.taintedBy !== null
   }
 
   /** Record a call that has been allowed to run. True if it newly tainted. */
   note(name) {
-    if (this.tainted || !isPrivateRead(name, this.publicServers)) return false
+    if (this.holdsPrivate || !isPrivateRead(name, this.publicServers)) return false
     this.taintedBy = name
     return true
   }
@@ -313,12 +325,21 @@ export class LeakGuard {
     return destinationsIn(name, input, this.publicServers).filter((d) => !this.allows(d))
   }
 
-  /** Remember what the user approved: a remote host, or one loopback port. */
+  /**
+   * Remember what the user approved: a remote host, or one loopback port.
+   * `example.com` and `www.example.com` are one site, since nearly every site
+   * redirects from one to the other; approving either covers both.
+   */
   approve(destinations) {
     for (const d of destinations) {
       if (!d?.host) continue
       const h = normalHost(d.host)
-      this.approved.add(LOCAL.has(h) ? `${h}:${d.port}` : h)
+      if (LOCAL.has(h)) {
+        this.approved.add(`${h}:${d.port}`)
+        continue
+      }
+      this.approved.add(h)
+      this.approved.add(h.startsWith('www.') ? h.slice(4) : `www.${h}`)
     }
   }
 }
@@ -338,7 +359,14 @@ const live = new Set()
 export const registerGuard = (g) => live.add(g)
 export const unregisterGuard = (g) => live.delete(g)
 
-/** Why the bridge should refuse to fetch `url` for the display, or null. */
+/**
+ * Why the bridge should refuse to fetch `url` for the display, or null.
+ *
+ * Applies only while a session holds private data, even when it asks before
+ * every new site: these fetches have no card to raise, the address that
+ * started them was already approved at the tool call, and before a private
+ * read there is nothing in them to leak.
+ */
 export function remoteBlocked(url) {
   let host
   try {
@@ -347,9 +375,28 @@ export function remoteBlocked(url) {
     return null // malformed: the proxy refuses it on its own
   }
   for (const g of live) {
-    if (g.tainted && !g.allowsHost(host)) {
+    if (g.holdsPrivate && !g.allowsHost(host)) {
       return `${host} has not been approved while private data is in the conversation`
     }
   }
   return null
+}
+
+/**
+ * Whether a redirect from `from` to `to` may be followed. A hop on the same
+ * site (http to https, a path change, adding or dropping www.) always may. A
+ * hop to another site is judged as if it were the address asked for in the
+ * first place: an approved site that is also an open redirector must not
+ * become a way to reach one that is not.
+ */
+export function redirectBlocked(from, to) {
+  try {
+    const a = new URL(from).hostname.toLowerCase().replace(/^www\./, '')
+    const b = new URL(to).hostname.toLowerCase().replace(/^www\./, '')
+    if (a === b) return null
+  } catch {
+    return 'the redirect could not be read'
+  }
+  const why = remoteBlocked(to)
+  return why ? `redirected to ${why}` : null
 }

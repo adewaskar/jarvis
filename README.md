@@ -247,8 +247,10 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_CLAUDE_EXECUTABLE` | bundled CLI | Run the agent through this executable instead, e.g. a sandbox wrapper that execs the real CLI |
 | `JARVIS_CHROME_PIPE` | none | WSL only: the Windows pipe name the browser relay connects to |
 | `JARVIS_DEBUG` | off | `1` logs every agent message to the bridge terminal, answer text and tool calls included |
-| `JARVIS_VOICE_ID` | none | ElevenLabs voice id |
-| `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe |
+| `JARVIS_VOICE_ID` | George (`JBFqnCBsd6RMkjVDRZzb`) | ElevenLabs voice id; `npm run voices` helps you pick one |
+| `JARVIS_TTS_MODEL` | `eleven_flash_v2_5` | ElevenLabs model. Flash starts speaking fastest; `eleven_turbo_v2_5` or `eleven_multilingual_v2` sound richer |
+| `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe. Never passed to the agent |
+| `JARVIS_ENV_FILE` | `~/.jarvis/.env` | A private settings file the bridge loads at start; variables set in the shell win |
 
 ### Frontend (`.env.local`)
 
@@ -263,14 +265,29 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 
 ### Adding an ElevenLabs key
 
-You do not have to touch a flag. Either:
+You do not have to touch a flag. Put the key in `~/.jarvis/.env`, outside the
+repository so no commit can pick it up:
 
-- Set `ELEVENLABS_API_KEY` on the bridge before starting it, **or**
-- Add the key to your `elevenlabs` MCP server's env in `~/.claude.json` — the
-  bridge reads it from there too.
+```
+ELEVENLABS_API_KEY=your-key
+JARVIS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
+```
 
-Either way, `/health` starts reporting the capability, the browser picks it up on
-the next boot, and both the voice and transcription upgrade automatically.
+Setting `ELEVENLABS_API_KEY` in the shell works too, and so does a key in your
+`elevenlabs` MCP server's env in `~/.claude.json`. Either way, `/health` starts
+reporting the capability, the browser picks it up on the next boot, and both the
+voice and transcription upgrade automatically. The startup log says which voice
+and model it is using and where the key came from, never the key itself.
+
+To choose a voice, run `npm run voices`. It saves the same line read by each
+British male voice on your account to `~/.jarvis/voice-samples/` and prints the
+id to use (`-- --all` for every voice, `-- <id>` for one). Use a voice from the
+library or one you've designed; don't clone a real person's voice without their
+permission.
+
+The key stays with the bridge. The agent's process is started without it, so a
+shell command cannot print it, and its file tools refuse `.env` files and
+`~/.jarvis/policy.json`.
 
 ---
 
@@ -309,15 +326,37 @@ data is in the session: your signed-in browser, your files, the camera, or any
 MCP server not listed under `publicServers`. After the first private read, any
 tool call carrying a URL to a host you haven't approved waits for the same
 approval card. That includes the browser, `WebFetch` and anything put on the
-display. Approving a host trusts it for the rest of the session. The HUD shows
-**PRIVATE · NEW SITES NEED APPROVAL** while this is on, and a new session
-starts clean. Hosts in `trustedHosts` or `JARVIS_TRUSTED_HOSTS` never ask.
+display. Approving a host trusts it for the rest of the session, `www.` or
+not. The HUD shows **PRIVATE · NEW SITES NEED APPROVAL** once something private
+has been read, and a new session starts clean. Hosts in `trustedHosts` or
+`JARVIS_TRUSTED_HOSTS` never ask.
+
+**Ask before every new site.** With `"askBeforeNewSites": "always"` (the
+default), the card comes before every site JARVIS hasn't reached yet in the
+session, private read or not, so a page can't send your signed-in browser to a
+link that does something. Before anything private is read the card asks
+**Reach this site?**; after, **Send to this site?**. Set it to
+`"afterPrivateRead"` to ask only once private data is in.
+
+**Redirects are checked too.**
+- **Built-in fetch:** a redirect to another site comes back as a new request
+  for that site, with its own card.
+- **Bridge fetches** (the display's images, video and pages, and `probe_url`):
+  every redirect hop to another site is judged like the address it leads to.
+  An approved site that redirects somewhere unapproved is refused while private
+  data is in the session.
+- **Your browser** follows redirects itself, so a redirect can't be stopped
+  mid-flight. JARVIS is told where the tab really landed, and clicking or typing
+  there names that site on its card.
+
+At startup the bridge lists every tool the policy would refuse. Servers that
+connect late are checked about twenty seconds later.
 
 What the guard does not cover, so you can decide what to connect:
 
-- **Before the first private read nothing is held back.** A page can still get
-  the browser pointed at any address, including a link that does something on a
-  site you're signed in to. Only clicking and typing wait for a card.
+- **A browser redirect has already happened by the time JARVIS sees it.** If an
+  approved site redirects the browser elsewhere, the request to the new site
+  has been made.
 - **Trust is per host, for the session.** Approving a host that carries other
   people's content (a paste site, a form service, a file share) opens it for
   anything later in that session. Don't put such hosts in `trustedHosts`.

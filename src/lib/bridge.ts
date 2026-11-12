@@ -49,7 +49,9 @@ type Frame = {
 export type ConfirmCard = {
   /** The bridge's id for this request, so it can withdraw the card. */
   id: string
-  kind: 'action' | 'leak'
+  /** action: something that changes things. site: a site not yet reached
+   *  this session. leak: a site not yet approved, with private data in. */
+  kind: 'action' | 'site' | 'leak'
   title: string
   tool: string
   detail: string
@@ -260,7 +262,7 @@ function dispatch(ws: WebSocket) {
       } else {
         onConfirm({
           id,
-          kind: c.kind === 'leak' ? 'leak' : 'action',
+          kind: c.kind === 'leak' || c.kind === 'site' ? c.kind : 'action',
           title: String(c.title ?? 'Allow this?'),
           tool: String(c.tool ?? ''),
           detail: String(c.detail ?? ''),

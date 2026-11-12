@@ -213,6 +213,16 @@ export function requestOnce(url, headers, timeoutMs) {
  * http://169.254.169.254/ is the whole SSRF attack, and a redirect to
  * file:// or data: is the other half of it.
  */
+/**
+ * A second test for each redirect hop, set by the bridge to the leak guard's
+ * rule (see redirectBlocked in guard.mjs). Returns why a hop may not be
+ * followed, or null. Kept as a hook so this module stays free of sessions.
+ */
+let hopCheck = () => null
+export const setRedirectCheck = (fn) => {
+  hopCheck = typeof fn === 'function' ? fn : () => null
+}
+
 export async function openRemote(startUrl, headers, timeoutMs) {
   let url = startUrl
   for (let hop = 0; ; hop++) {
@@ -229,8 +239,12 @@ export async function openRemote(startUrl, headers, timeoutMs) {
         throw proxyError(502, 'bad redirect')
       }
       // vetTarget re-runs the scheme and host checks; guardedLookup re-runs the
-      // address check when the next hop connects.
-      url = vetTarget(next.href)
+      // address check when the next hop connects; hopCheck re-runs the leak
+      // guard, so a redirect cannot reach a site the user has not approved.
+      const vetted = vetTarget(next.href)
+      const refused = hopCheck(String(url), String(vetted))
+      if (refused) throw proxyError(403, refused)
+      url = vetted
       continue
     }
     return { res, url }
