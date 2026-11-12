@@ -3,12 +3,13 @@
  *
  * Two layers, and the difference between them is the point of this file:
  *
- *   decideTool(name)         — the policy by tool *name*: which built-ins and
- *                              MCP tools count as reads and which need
- *                              JARVIS_ALLOW_WRITES. Unchanged from when it lived
- *                              in server.mjs.
+ *   tierOf(name, policy)      — the policy by tool *name*: 'allow', 'confirm'
+ *                               (waits for the user to press Enter on screen)
+ *                               or 'deny'. Read from an explicit policy file —
+ *                               see default-policy.json — not guessed from
+ *                               verbs in tool names.
  *   checkToolUse(name, input) — the same policy plus the *arguments*: where a
- *                              file tool is pointed, what a fetch is aimed at.
+ *                               file tool is pointed, what a fetch is aimed at.
  *
  * The second one exists because of where it is enforced. canUseTool is not
  * consulted for every call: the CLI settles some itself before asking — a Read
@@ -20,150 +21,101 @@
  * before it runs, auto-approved or not, and its deny is final. So the bridge
  * enforces through the hook, and canUseTool stays as the second gate it
  * always was.
+ *
+ * Why a list instead of the verb rules this used to have. Reading verbs out of
+ * tool names fails open in both directions that matter: `search_and_replace`
+ * begins with a read verb and ran, and on an allowlisted server anything whose
+ * effectful verb was not in the regex — `clone`, `share`, `forward`, `move`,
+ * `execute` — ran too. A list fails closed: a tool nobody named is refused, and
+ * the bridge prints its name at startup so you can decide where it belongs.
  */
 
 import { lookup } from 'node:dns/promises'
-import { lstatSync, readlinkSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { blockedAddress, vetTarget } from './net.mjs'
 
-/**
- * Both spellings of every renamed built-in are listed on purpose. The SDK
- * presents several tools to the model under newer names — Task is Agent,
- * BashOutput is TaskOutput, KillShell is TaskStop, and the MCP resource tools
- * gained a "Tool" suffix — so a set holding only the old names never matches
- * and the tool falls through to the write branch, which is the opposite of
- * what these lists mean. Keep both until the old names are certainly gone.
- */
-export const READ_ONLY_BUILTINS = new Set([
-  'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite',
-  'Task', 'Agent', 'ToolSearch',
-  'ListMcpResources', 'ListMcpResourcesTool',
-  'ReadMcpResource', 'ReadMcpResourceTool',
-  'BashOutput', 'TaskOutput',
-])
-export const WRITE_BUILTINS = new Set([
-  'Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
-  'KillShell', 'TaskStop',
-])
-
-/** MCP tools arrive as `mcp__<server>__<tool>`. */
-const mcpServerOf = (toolName) =>
-  toolName.startsWith('mcp__') ? toolName.split('__')[1] : null
-
-/** The tool half, which can itself contain underscores: `mcp__x__a__b` -> `a__b`. */
-const mcpToolOf = (toolName) => toolName.split('__').slice(2).join('__')
+export const DEFAULT_POLICY_FILE = fileURLToPath(new URL('./default-policy.json', import.meta.url))
 
 /**
- * MCP policy, and why it is shaped this way.
- *
- * A short list of "servers that can change things" is the wrong default,
- * because it is a list of what we happened to think of. Every server not on it
- * runs unconditionally — and on a real machine that quietly includes placing a
- * phone call, spending an advertising budget, deleting a generated character
- * and writing files to disk. A voice assistant cannot ask "are you sure", so
- * the bridge has to be the one that is sure.
- *
- * So the default is deny, softened in two ways so the demo stays usable:
- *
- *   1. READ_ONLY_MCP is an explicit allowlist of servers whose whole surface is
- *      lookups and generation — search, registries, analytics reads. Anything
- *      there runs in read-only mode.
- *   2. Everywhere else, the tool has to argue for itself: its own name must
- *      begin with a read verb. `list_devices` runs; `install_apk` does not.
- *
- * On top of both sits a veto: a name containing a plainly effectful verb needs
- * allowWrites no matter which server it came from, which is what keeps
- * `make_outbound_call` and `download_lottie` still until you ask for them.
+ * `*` matches anything that does not contain `__`; every other character is
+ * literal. `__` is what separates server from tool in `mcp__server__tool`, so a
+ * wildcard in one part can never spill into the next.
  */
-const READ_ONLY_MCP = new Set([
-  'exa', 'exa-code', 'serper', 'serpapi', 'lottie-search', 'mcp-registry',
-  'openrouter', 'openrouter-image', 'Microsoft_Clarity',
-  // The generation servers belong here too, and leaving them out was a real
-  // regression: `generate_image` begins with no read verb, so it fell to the
-  // deny branch and "generate an image of the Mark VII suit" — the headline
-  // demo — stopped working in the default mode.
-  //
-  // Putting them on the allowlist is safe because the veto below still applies
-  // to allowlisted servers: it is what continues to withhold
-  // make_outbound_call, delete_character, create_* and edit_image. Generation
-  // runs; acting on the world does not.
-  'higgsfield', 'heygen', 'elevenlabs',
-])
+const pattern = (p) =>
+  new RegExp(
+    '^' +
+      String(p)
+        .split('*')
+        .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+        .join('(?:(?!__).)*') +
+      '$',
+  )
+
+const strings = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()) : [])
 
 /**
- * Anchored on the tool name, so it reads the verb rather than the noun.
- * `screenshot` is in here because it is a read that doesn't sound like one,
- * and the persona is told in as many words to put screenshots on the display.
+ * A policy object, ready to match against. Accepts the parsed JSON of a policy
+ * file; anything missing is an empty list.
  */
-const READ_VERB =
-  /^(get|list|read|search|find|query|fetch|check|describe|inspect|show|view|explain|screenshot)/i
-
-/**
- * Unanchored on purpose — `make_outbound_call` and `Bulk-Edit-Events` both
- * hide their verb in the middle. `download` is here because it writes a file
- * even though it sounds like a read.
- */
-const EFFECTFUL_VERB =
-  /(send|call|post|create|delete|remove|update|edit|write|install|launch|tap|swipe|press|type|buy|pay|charge|publish|deploy|outbound|download)/i
-
-/**
- * Tools whose names trip the veto without deserving it.
- *
- * The veto reads verbs out of names, which is the right instinct and
- * occasionally the wrong answer. `openrouter send-message` sends a prompt to a
- * language model and gets text back — nothing in the world changes — but it is
- * indistinguishable by name from sending mail. Asking a second model a question
- * is one of the better things this assistant can do, so it is named here
- * instead of being lost to a regex.
- *
- * Full `server__tool` keys, so an exemption can never leak across servers.
- */
-const VETO_EXEMPT = new Set([
-  'openrouter__send-message',
-  'openrouter__send-feedback',
-])
-
-export function decideTool(name, allowWrites = false) {
-  if (READ_ONLY_BUILTINS.has(name)) return true
-  if (WRITE_BUILTINS.has(name)) return allowWrites
-
-  const server = mcpServerOf(name)
-  if (server) {
-    // The HUD, and the interface controls beside it. Both run in this process
-    // and draw on our own screen, so neither is something to withhold —
-    // without them JARVIS has no display at all. They also have to be named
-    // here rather than left to the verb rules below, which read `ui_theme` as
-    // a write and would hold the whole surface back behind allowWrites.
-    if (server === 'jarvis' || server === 'jarvis_ui') return true
-
-    // The browser server gates itself, at construction: chromeServer() only
-    // builds the acting tools — click, type, form input, close tab — when
-    // allowWrites is set, so anything that reaches here at all is something
-    // the same policy has already permitted. Deciding it a second time by
-    // reading verbs out of the name would only get it wrong: `chrome_navigate`
-    // begins with no read verb and would fall to the write branch, which would
-    // withhold the one tool the whole server is for.
-    if (server === 'jarvis_chrome') return true
-
-    // The camera. Not withheld behind allowWrites: looking changes nothing,
-    // and the real gate is the browser's own camera permission plus an
-    // indicator the user can see for as long as it is live.
-    if (server === 'jarvis_eyes') return true
-
-    const tool = mcpToolOf(name)
-    if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
-      return allowWrites
-    }
-    // The session tools this bridge is developed inside count as read-only too.
-    if (READ_ONLY_MCP.has(server) || server.startsWith('ccd_session')) return true
-    return READ_VERB.test(tool) ? true : allowWrites
+export function compilePolicy(raw = {}) {
+  return {
+    allow: strings(raw.allow).map(pattern),
+    confirm: strings(raw.confirm).map(pattern),
+    deny: strings(raw.deny).map(pattern),
+    publicServers: new Set(strings(raw.publicServers)),
+    trustedHosts: strings(raw.trustedHosts),
   }
-  return allowWrites
 }
 
+/**
+ * The policy in force: JARVIS_POLICY if set, else ~/.jarvis/policy.json if it
+ * exists, else the bundled default. A user file replaces the default rather
+ * than merging into it, so what you read in it is the whole of what applies.
+ * A file that will not parse stops the bridge: silently falling back to a
+ * different policy than the one you wrote is the wrong kind of helpful.
+ */
+export function loadPolicy({ file = process.env.JARVIS_POLICY, home = homedir() } = {}) {
+  const userFile = join(home, '.jarvis', 'policy.json')
+  const path = file || (existsSync(userFile) ? userFile : DEFAULT_POLICY_FILE)
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'))
+  } catch (err) {
+    throw new Error(`could not read the tool policy at ${path}: ${err.message}`)
+  }
+  return { path, ...compilePolicy(raw) }
+}
+
+let DEFAULT_POLICY = null
+const defaultPolicy = () => (DEFAULT_POLICY ??= compilePolicy(JSON.parse(readFileSync(DEFAULT_POLICY_FILE, 'utf8'))))
+
+/** 'allow' | 'confirm' | 'deny' for a tool name. Unlisted is 'deny'. */
+export function tierOf(name, policy = defaultPolicy()) {
+  const hit = (list) => list.some((re) => re.test(name))
+  if (hit(policy.deny)) return 'deny'
+  if (hit(policy.confirm)) return 'confirm'
+  if (hit(policy.allow)) return 'allow'
+  return 'deny'
+}
+
+/** Whether a tool is listed at all, for the startup report of unlisted tools. */
+export function isListed(name, policy = defaultPolicy()) {
+  return [...policy.allow, ...policy.confirm, ...policy.deny].some((re) => re.test(name))
+}
+
+/**
+ * Whether a tool can run at all in this mode: 'allow' always, 'confirm' only
+ * with writes on (and then only once the user approves it). Kept as a boolean
+ * for the callers that only need yes or no.
+ */
+export function decideTool(name, allowWrites = false, policy = defaultPolicy()) {
+  const tier = tierOf(name, policy)
+  return tier === 'allow' || (tier === 'confirm' && allowWrites)
+}
 
 /**
  * The built-in tools the agent is offered at all.
@@ -216,7 +168,18 @@ const SECRET_FILES = /^(\.env(\..*)?|\.netrc|\.git-credentials|\.npmrc|\.pypirc|
  * write through it still lands at its target, so judging the link's own
  * location would let a Write escape the roots. Null for a link loop.
  */
+/**
+ * A Windows network or device path: \\host\share, //host/share, \\?\…, \\.\….
+ *
+ * Refused before anything touches the filesystem, because merely resolving one
+ * makes Windows look the host up and try to connect to it — which sends the
+ * host name (and whatever the model wrote into it) off the machine, and offers
+ * the user's login to whoever answers.
+ */
+export const isNetworkPath = (p) => typeof p === 'string' && /^[\\/]{2}/.test(p.trim())
+
 function resolveReal(p, hops = 0) {
+  if (isNetworkPath(p)) return null
   let head = p
   const tail = []
   for (;;) {
@@ -266,8 +229,11 @@ export function fileRoots({ workspace, extra = [] }) {
 /** Why `target` may not be touched, or null if it may. */
 export function pathProblem(target, { cwd, roots }) {
   if (typeof target !== 'string' || !target) return null
+  if (isNetworkPath(target)) return `${target} is a network path`
   const expanded = target.startsWith('~') ? homedir() + target.slice(1) : target
-  const real = resolveReal(resolvePath(cwd, expanded))
+  const joined = resolvePath(cwd, expanded)
+  if (isNetworkPath(joined)) return `${target} is a network path`
+  const real = resolveReal(joined)
   if (!real) return `${target} cannot be resolved`
   if (!roots.some((root) => inside(root, real))) {
     return `${target} is outside the folders JARVIS may use`
@@ -287,23 +253,53 @@ export function pathProblem(target, { cwd, roots }) {
 /**
  * The full decision for one call: name first, then arguments.
  *
- * Returns { allow: true } or { allow: false, reason }. The reason can end up
- * spoken, so it is a plain sentence with no paths or commands to read out
- * beyond the one the model already chose.
+ * Returns { verdict, allow, reason }. verdict is 'allow', 'confirm' (run only
+ * once the user approves it on screen) or 'deny'; allow is true unless the
+ * verdict is 'deny', so a confirm still counts as something that may run. The
+ * reason can end up spoken, so it is a plain sentence with no paths or
+ * commands to read out beyond the one the model already chose.
  */
-export function checkToolUse(name, input, { allowWrites = false, cwd, roots }) {
-  if (!decideTool(name, allowWrites)) {
-    return {
-      allow: false,
-      reason:
-        'Blocked: JARVIS is running in read-only mode and cannot take actions' +
+export function checkToolUse(name, input, { allowWrites = false, cwd, roots, policy = defaultPolicy() }) {
+  const deny = (reason) => ({ verdict: 'deny', allow: false, reason })
+  const tier = tierOf(name, policy)
+  if (tier === 'deny') {
+    return deny(
+      'Blocked: this tool is not in the policy JARVIS runs under. Tell the user' +
+        ' it is unavailable; they can add it to their policy file if they want it.',
+    )
+  }
+  if (tier === 'confirm' && !allowWrites) {
+    return deny(
+      'Blocked: JARVIS is running in read-only mode and cannot take actions' +
         ' that change anything. Tell the user this action is unavailable' +
         ' until they enable write access on the machine.',
-    }
+    )
   }
   for (const field of PATH_FIELDS[name] ?? []) {
     const problem = pathProblem(input?.[field], { cwd, roots })
-    if (problem) return { allow: false, reason: `Blocked: ${problem}.` }
+    if (problem) return deny(`Blocked: ${problem}.`)
+  }
+  if (name === 'Glob' && typeof input?.pattern === 'string') {
+    // A pattern can carry its own starting point — `/etc/**`, `C:\Users\**`,
+    // `\\host\share\*` — which `path` being unset or innocent says nothing
+    // about. Judge the part before the first wildcard as a path of its own.
+    const pattern = input.pattern.trim()
+    if (/^[\\/~]|^[a-z]:[\\/]/i.test(pattern)) {
+      const fixed = pattern.split(/[*?[{]/)[0]
+      const problem = pathProblem(fixed || pattern, { cwd, roots })
+      if (problem) return deny(`Blocked: ${problem}.`)
+    }
+  }
+  if (/^mcp__jarvis_chrome__chrome_navigate$/.test(name)) {
+    // The user's own browser goes to web pages and nowhere else. A data: or
+    // javascript: address is a page the model wrote, running in that browser;
+    // file: reads the disk; chrome: opens settings.
+    const url = String(input?.url ?? '').replace(/[\t\n\r]/g, '').trim()
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1]?.toLowerCase()
+    const hostPort = /^[a-z0-9.-]+:\d{1,5}(\/|$)/i.test(url) // localhost:3000/x has no scheme
+    if (scheme && !hostPort && scheme !== 'http' && scheme !== 'https' && url.toLowerCase() !== 'about:blank') {
+      return deny('Blocked: the browser can only be sent to http and https addresses.')
+    }
   }
   if (name === 'WebFetch') {
     // The bridge's own fetches refuse the LAN and cloud metadata; the built-in
@@ -312,10 +308,10 @@ export function checkToolUse(name, input, { allowWrites = false, cwd, roots }) {
     try {
       vetTarget(input?.url)
     } catch (err) {
-      return { allow: false, reason: `Blocked: that address cannot be fetched (${err.message}).` }
+      return deny(`Blocked: that address cannot be fetched (${err.message}).`)
     }
   }
-  return { allow: true }
+  return { verdict: tier, allow: true, reason: null }
 }
 
 /**

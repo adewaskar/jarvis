@@ -3,7 +3,18 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { builtinTools, checkToolUse, decideTool, fetchTargetProblem, fileRoots } from '../bridge/policy.mjs'
+import {
+  DEFAULT_POLICY_FILE,
+  builtinTools,
+  checkToolUse,
+  compilePolicy,
+  decideTool,
+  fetchTargetProblem,
+  fileRoots,
+  isNetworkPath,
+  loadPolicy,
+  tierOf,
+} from '../bridge/policy.mjs'
 
 const workspace = mkdtempSync(join(tmpdir(), 'jarvis-ws-'))
 const roots = fileRoots({ workspace })
@@ -15,11 +26,106 @@ test('decideTool keeps its existing verdicts', () => {
   assert.equal(decideTool('Bash'), false)
   assert.equal(decideTool('Bash', true), true)
   assert.equal(decideTool('mcp__jarvis__display'), true)
-  assert.equal(decideTool('mcp__someserver__list_devices'), true)
-  assert.equal(decideTool('mcp__someserver__install_apk'), false)
   assert.equal(decideTool('mcp__higgsfield__generate_image'), true)
   assert.equal(decideTool('mcp__elevenlabs__make_outbound_call'), false)
   assert.equal(decideTool('SomeFutureBuiltin'), false)
+})
+
+test('the policy is a list, not a guess from verbs in tool names', () => {
+  // Each of these ran under the old verb rules.
+  assert.equal(tierOf('mcp__someserver__list_devices'), 'deny') // read verb, unknown server
+  assert.equal(tierOf('mcp__files__search_and_replace'), 'deny') // read verb, writes
+  assert.equal(tierOf('mcp__elevenlabs__voice_clone'), 'deny') // allowlisted server, no veto verb
+  assert.equal(tierOf('mcp__ccd_session__start_session'), 'deny') // the old dev-environment exemption
+  assert.equal(decideTool('mcp__someserver__install_apk', true), false) // writes on changes nothing
+})
+
+test('acting tools need an on-screen approval rather than a global switch', () => {
+  assert.equal(tierOf('Bash'), 'confirm')
+  assert.equal(tierOf('mcp__jarvis_chrome__chrome_click'), 'confirm')
+  assert.equal(tierOf('mcp__jarvis_chrome__chrome_page_text'), 'allow')
+  assert.equal(checkToolUse('Bash', { command: 'ls' }, ctx(true)).verdict, 'confirm')
+  assert.equal(checkToolUse('Bash', { command: 'ls' }, ctx(false)).verdict, 'deny')
+})
+
+test('policy patterns and precedence', () => {
+  const p = compilePolicy({ allow: ['mcp__a__*'], confirm: ['mcp__a__send*'], deny: ['mcp__a__send_all'] })
+  assert.equal(tierOf('mcp__a__get', p), 'allow')
+  assert.equal(tierOf('mcp__a__send_one', p), 'confirm')
+  assert.equal(tierOf('mcp__a__send_all', p), 'deny')
+  assert.equal(tierOf('mcp__ab__get', p), 'deny') // * does not widen the server name
+  assert.equal(tierOf('mcp__a.b__get', compilePolicy({ allow: ['mcp__a.b__*'] })), 'allow') // . is literal
+  assert.equal(tierOf('mcp__aXb__get', compilePolicy({ allow: ['mcp__a.b__*'] })), 'deny')
+  // * stays inside one part of the name: it never crosses a __.
+  assert.equal(tierOf('mcp__a__x__y', p), 'deny')
+  assert.equal(tierOf('mcp__a__b__get', compilePolicy({ allow: ['mcp__*__get'] })), 'deny')
+  assert.equal(tierOf('mcp__a__get_one', compilePolicy({ allow: ['mcp__*__get_one'] })), 'allow')
+})
+
+test('the default policy does not guess from verbs either', () => {
+  assert.equal(tierOf('mcp__higgsfield__generate_image'), 'allow')
+  assert.equal(tierOf('mcp__higgsfield__get_or_delete_job'), 'deny')
+  assert.equal(tierOf('mcp__elevenlabs__search_and_replace_voice'), 'deny')
+  assert.equal(tierOf('mcp__exa__x__y'), 'deny')
+  // Reaches resources on servers whose tools are not listed at all.
+  assert.equal(tierOf('ReadMcpResourceTool'), 'deny')
+})
+
+test('a network path is refused before anything touches the filesystem', () => {
+  // Resolving one makes Windows look the host up and try to connect to it.
+  const unc = String.raw`\\one-time-code-482193.evil.example\s\a`
+  assert.equal(isNetworkPath(unc), true)
+  assert.equal(isNetworkPath('//evil.example/share/a'), true)
+  assert.equal(isNetworkPath(String.raw`C:\Users\x\a.txt`), false)
+  assert.equal(isNetworkPath('/tmp/a.txt'), false)
+  const started = Date.now()
+  for (const tool of ['Read', 'Grep', 'Glob']) {
+    const field = tool === 'Read' ? 'file_path' : 'path'
+    assert.match(checkToolUse(tool, { [field]: unc, pattern: 'x' }, ctx()).reason, /network path/)
+  }
+  assert.match(checkToolUse('Glob', { pattern: unc + String.raw`\*` }, ctx()).reason, /network path/)
+  assert.ok(Date.now() - started < 1000, 'no lookup should have been attempted')
+})
+
+test('a Glob pattern is judged as a path too', () => {
+  assert.equal(allowed('Glob', { pattern: '**/*.png' }), true)
+  assert.equal(allowed('Glob', { pattern: join(workspace, '**', '*.png') }), true)
+  assert.equal(allowed('Glob', { pattern: join(homedir(), '.ssh', '*') }), false)
+  assert.equal(allowed('Glob', { pattern: '/etc/**' }), false)
+  assert.equal(allowed('Glob', { pattern: '~/.claude/**' }), false)
+})
+
+test('the browser is only ever sent to web addresses', () => {
+  const nav = (url) => checkToolUse('mcp__jarvis_chrome__chrome_navigate', { url }, ctx()).allow
+  for (const url of ['https://example.com/', 'http://example.com/', 'example.com/x', 'localhost:3000/x', 'back', 'forward', 'about:blank']) {
+    assert.equal(nav(url), true, url)
+  }
+  for (const url of [
+    'data:text/html;base64,PHNjcmlwdD4=',
+    "javascript:fetch('https://evil.example/')",
+    'file:///C:/Users/x/.ssh/id_rsa',
+    'chrome://settings',
+    'JaVaScRiPt:alert(1)',
+    'java\tscript:alert(1)',
+  ]) {
+    assert.equal(nav(url), false, url)
+  }
+})
+
+test('a user policy file replaces the default, and a broken one is an error', () => {
+  const home = mkdtempSync(join(tmpdir(), 'jarvis-home-'))
+  try {
+    assert.equal(loadPolicy({ home }).path, DEFAULT_POLICY_FILE)
+    mkdirSync(join(home, '.jarvis'))
+    writeFileSync(join(home, '.jarvis', 'policy.json'), JSON.stringify({ allow: ['Read'] }))
+    const mine = loadPolicy({ home })
+    assert.equal(tierOf('Read', mine), 'allow')
+    assert.equal(tierOf('WebSearch', mine), 'deny')
+    writeFileSync(join(home, '.jarvis', 'policy.json'), '{ not json')
+    assert.throws(() => loadPolicy({ home }), /could not read the tool policy/)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
 })
 
 test('read-only mode refuses a shell command the CLI would auto-approve', () => {

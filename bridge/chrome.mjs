@@ -951,6 +951,34 @@ export function chromeServer({ allowWrites }) {
   })
 }
 
+/**
+ * The address of the page an acting tool (click, type, key, form input) would
+ * land on, for the approval card and the leak guard. Null when it cannot be
+ * told.
+ *
+ * Resolves the tab exactly as `forward` will — the one named, else the one we
+ * remember — but never opens a tab to find out: this runs before the user has
+ * approved anything, and asking a question should not change the browser.
+ * Reads the address the same way `settle` does, from the reader's own `URL:`
+ * line, since the tab context reports a new address before the page is there.
+ */
+export async function currentPage(args = {}) {
+  try {
+    const asked = Number(args.tabId)
+    const named = args.tabId !== undefined && args.tabId !== null && `${args.tabId}`.trim() !== ''
+    const tab = named && Number.isFinite(asked) ? asked : activeTab
+    if (tab === null || tab === undefined) return null
+    const reply = await link.call('get_page_text', { tabId: tab, max_chars: 200 })
+    const blocks = reply?.result?.content
+    const text = Array.isArray(blocks)
+      ? blocks.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('\n')
+      : ''
+    return /^URL:\s*(\S+)/m.exec(text)?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+
 /** Whether the extension looks reachable, for the boot log. */
 export async function chromeAvailable() {
   return (await findSocket()) !== null

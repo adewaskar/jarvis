@@ -1898,3 +1898,124 @@ kbd {
   transform: scaleX(-1);
   background: #000;
 }
+
+/* ---------------------------------------------------------------------------
+   Approval card and private-session chip (ui/Confirm.tsx). Above everything
+   else on purpose: an approval that can be hidden behind a blade is one that
+   gets answered without being read.
+   --------------------------------------------------------------------------- */
+
+/* Below the hand-tracking badge (.hands-live, top centre), and above it in the
+   stack, so neither can cover the other. */
+.guard-chip {
+  position: fixed;
+  top: 2.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 97;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid rgba(255, 196, 87, 0.6);
+  background: rgba(20, 12, 2, 0.85);
+  color: #ffc457;
+  font: 500 0.62rem/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.16em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.confirm {
+  position: fixed;
+  left: 50%;
+  bottom: 6rem;
+  transform: translateX(-50%);
+  z-index: 98;
+  width: min(34rem, calc(100vw - 2rem));
+  padding: 0.9rem 1rem 0.8rem;
+  background: rgba(2, 10, 12, 0.97);
+  border: 1px solid var(--accent, #19d8d2);
+  box-shadow: 0 0 2.5rem rgba(25, 216, 210, 0.18);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: #cfe6e3;
+}
+
+.confirm-leak {
+  border-color: #ffc457;
+  box-shadow: 0 0 2.5rem rgba(255, 196, 87, 0.2);
+}
+
+.confirm-head {
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: var(--accent, #19d8d2);
+  margin-bottom: 0.45rem;
+}
+
+.confirm-leak .confirm-head { color: #ffc457; }
+.confirm-more { color: #6d8886; }
+
+.confirm-title {
+  font-size: 0.95rem;
+  color: #f2fbfa;
+  overflow-wrap: anywhere;
+}
+
+.confirm-tool {
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+  color: #6d8886;
+}
+
+.confirm-detail {
+  margin: 0.55rem 0 0;
+  padding: 0.45rem 0.55rem;
+  max-height: 9rem;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.confirm-note {
+  margin-top: 0.5rem;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: #a9c3c0;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.confirm-actions button {
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  padding: 0.35rem 0.75rem;
+  background: transparent;
+  color: #cfe6e3;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+.confirm-actions .confirm-allow {
+  border-color: var(--accent, #19d8d2);
+  color: var(--accent, #19d8d2);
+}
+
+.confirm-leak .confirm-actions .confirm-allow {
+  border-color: #ffc457;
+  color: #ffc457;
+}
+
+.confirm-actions kbd {
+  margin-left: 0.35rem;
+  font: inherit;
+  font-size: 0.6rem;
+  opacity: 0.6;
+}
