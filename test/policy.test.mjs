@@ -20,6 +20,11 @@ test('decideTool keeps its existing verdicts', () => {
   // A server may namespace its tools; the verb is read from the last segment.
   assert.equal(decideTool('mcp__homeassistant__homeassistant__GetLiveContext'), true)
   assert.equal(decideTool('mcp__homeassistant__intent__HassTurnOn'), false)
+  // ...or from the front, as before, when the namespace comes after the verb.
+  assert.equal(decideTool('mcp__someserver__get_devices__by_room'), true)
+  // A read verb in the last segment does not outvote an effectful one earlier.
+  assert.equal(decideTool('mcp__someserver__delete__get_status'), false)
+  assert.equal(decideTool('mcp__someserver__delete__get_status', true), true)
   assert.equal(decideTool('mcp__higgsfield__generate_image'), true)
   assert.equal(decideTool('mcp__elevenlabs__make_outbound_call'), false)
   assert.equal(decideTool('SomeFutureBuiltin'), false)

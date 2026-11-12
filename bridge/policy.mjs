@@ -161,7 +161,7 @@ export function decideTool(name, allowWrites = false) {
     if (READ_ONLY_MCP.has(server) || server.startsWith('ccd_session')) return true
     // Some servers namespace their tools (`homeassistant__GetLiveContext`),
     // which hid the verb from an anchored match and refused plain reads.
-    return READ_VERB.test(tool.split('__').pop()) ? true : allowWrites
+    return READ_VERB.test(tool) || READ_VERB.test(tool.split('__').pop()) ? true : allowWrites
   }
   return allowWrites
 }
