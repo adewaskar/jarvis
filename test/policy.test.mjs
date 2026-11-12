@@ -17,6 +17,9 @@ test('decideTool keeps its existing verdicts', () => {
   assert.equal(decideTool('mcp__jarvis__display'), true)
   assert.equal(decideTool('mcp__someserver__list_devices'), true)
   assert.equal(decideTool('mcp__someserver__install_apk'), false)
+  // A server may namespace its tools; the verb is read from the last segment.
+  assert.equal(decideTool('mcp__homeassistant__homeassistant__GetLiveContext'), true)
+  assert.equal(decideTool('mcp__homeassistant__intent__HassTurnOn'), false)
   assert.equal(decideTool('mcp__higgsfield__generate_image'), true)
   assert.equal(decideTool('mcp__elevenlabs__make_outbound_call'), false)
   assert.equal(decideTool('SomeFutureBuiltin'), false)
