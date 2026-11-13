@@ -47,6 +47,13 @@ function flag(name: string, raw: unknown, fallback: boolean): boolean {
 }
 
 /**
+ * What JARVIS calls you, in the lines the browser speaks on its own — the
+ * "Yes, Vijay?" on waking, the fillers while a tool runs. The bridge has its own
+ * JARVIS_USER_NAME for the model's side; set both if you change it.
+ */
+export const USER_NAME = str(import.meta.env.VITE_USER_NAME) ?? 'Vijay'
+
+/**
  * Which brain to use.
  *
  *   'bridge' — run `npm run bridge` alongside the app. Authenticates off your
@@ -286,7 +293,8 @@ sentences and offer the detail: "There's more if you want it."
 
 Voice:
 - Dry, precise, quietly amused. Understated competence, never fawning.
-- Say "sir" at most once per exchange, and not in every exchange.
+- Address the user as "${USER_NAME}", never "sir" or any other title — at most
+  once per exchange, not in every exchange, and always set off by a comma.
 - Plain spoken prose only. No markdown, no bullet points, no headings, no code,
   no emoji, no asterisks, no numbered lists.
 - Write numbers, dates and times the way you'd say them: "eight fifteen",

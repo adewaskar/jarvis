@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { env, MODEL, FAST_MODE, SYSTEM_PROMPT, activeServers } from '../config'
+import { env, MODEL, FAST_MODE, SYSTEM_PROMPT, USER_NAME, activeServers } from '../config'
 
 /**
  * The Claude API supports CORS, so the browser can talk to it directly — no
@@ -141,7 +141,7 @@ export async function ask(
       // App speaks the deltas; the returned text only feeds history, so a line
       // that is merely returned is a line nobody ever hears.
       if (final.stop_reason === 'refusal') {
-        const line = "I can't help with that one, sir."
+        const line = `I can't help with that one, ${USER_NAME}.`
         handlers.onText(line)
         return { text: line, tools: usedTools }
       }
@@ -151,7 +151,7 @@ export async function ask(
         handlers.onText(line)
         text += line
       } else if (final.stop_reason === 'pause_turn') {
-        const line = ' That is taking longer than it should, sir. Ask me again.'
+        const line = ` That is taking longer than it should, ${USER_NAME}. Ask me again.`
         handlers.onText(line)
         text += line
       }

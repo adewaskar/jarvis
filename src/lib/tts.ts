@@ -5,6 +5,7 @@ import {
   TTS_ENGINE,
   KOKORO_VOICE,
   BRIDGE_HTTP_URL,
+  USER_NAME,
 } from '../config'
 import * as kokoro from './kokoro'
 import { caps } from './capabilities'
@@ -31,7 +32,7 @@ type Speaker = {
   /** Feed streamed text in. Complete sentences are spoken as they appear. */
   push: (delta: string) => void
   /** Speak a phrase ahead of anything still queued. Used for filler like
-   *  "Working on it, sir" while a tool runs. */
+   *  "Working on it, Vijay" while a tool runs. */
   say: (text: string) => void
   /** No more text coming — flush the remainder and resolve when audio ends. */
   end: () => Promise<void>
@@ -304,11 +305,43 @@ function outputContext(): AudioContext | null {
  *
  * speechSynthesis ignores SSML, so punctuation is the only prosody control
  * available — the engine pauses on commas and full stops. Making sure the
- * vocative "sir" is always set off by a comma buys the small beat before it
- * that does most of the characterisation.
+ * vocative — the user's name — is always set off by a comma buys the small beat
+ * before it that does most of the characterisation.
  */
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * The name as a vocative: a word, a space, the name, then a pause or the end of
+ * the line. The lookahead leaves "Vijay Kumar" (and "Sir Isaac Newton") alone.
+ */
+const VOCATIVE = new RegExp(
+  `(\\S+)\\s+(${escapeRe(USER_NAME)}|sir)(?=\\s*[.,!?;:]|\\s*$)`,
+  'gi',
+)
+
+/**
+ * Words after which the name is the object of the sentence, not someone being
+ * spoken to: "an email for Vijay." must not become "an email for, Vijay."
+ */
+const NOT_VOCATIVE = new Set([
+  'to', 'for', 'from', 'with', 'by', 'about', 'of', 'at', 'and', 'or', 'than',
+  'like', 'dear', 'hi', 'hello', 'hey', 'thanks', 'cc', 'the', 'a', 'mr', 'mrs',
+])
+
+export function commaBeforeName(text: string): string {
+  return text.replace(VOCATIVE, (whole, before: string, name: string) => {
+    // Already punctuated — "Very good. Vijay?" used to come out as
+    // "Very good., Vijay?" because the old pattern only refused a comma.
+    if (/[.,!?;:—–-]$/.test(before)) return whole
+    if (NOT_VOCATIVE.has(before.toLowerCase())) return whole
+    return `${before}, ${name}`
+  })
+}
+
 function shape(text: string): string {
-  return (
+  // The vocative wants its comma — that small beat before the name does most of
+  // the characterisation. Applied last, so it sees the cleaned-up spacing.
+  return commaBeforeName(
     text
       // Models leak markdown even when told not to, and a synthesiser will
       // happily read "https colon slash slash" out loud. Strip the syntax and
@@ -320,12 +353,8 @@ function shape(text: string): string {
       .replace(/https?:\/\/[^\s]*[^\s.,;:!?)\]]/g, '')
       .replace(/[*_`#>]+/g, '')
       .replace(/^\s*[-•]\s+/gm, '')
-      // The vocative wants its comma — that small beat before "sir" does most
-      // of the characterisation. Anchored to a following pause or end of line
-      // so the honorific is left alone: "Sir Isaac Newton" is not a vocative.
-      .replace(/([^,\s])\s+(sir)(\s*[.,!?;:]|\s*$)/gi, '$1, $2$3')
       .replace(/\s+/g, ' ')
-      .trim()
+      .trim(),
   )
 }
 
@@ -355,7 +384,7 @@ export function createSpeaker(): Speaker {
   const enqueue = (sentence: string, priority = false) => {
     if (cancelled) return
     // Shape once here so both engines get the same text — stripped markdown,
-    // and the comma before "sir" that buys the beat.
+    // and the comma before the name that buys the beat.
     const text = shape(sentence)
     if (!text) return
 
