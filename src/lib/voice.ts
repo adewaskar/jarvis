@@ -1,4 +1,4 @@
-import { BRIDGE_HTTP_URL } from '../config'
+import { BARGE_IN, BRIDGE_HTTP_URL } from '../config'
 import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startVad, type Vad } from './vad'
@@ -268,6 +268,36 @@ const norm = (s: string) =>
  */
 const OVERRIDE =
   /\b(stop|wait|jarvis|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\b/i
+
+/**
+ * Words that interrupt him on the browser-recogniser path. Narrower than
+ * OVERRIDE: "no" is left out because he says it himself all the time.
+ */
+const BARGE = /\b(stop|wait|jarvis|cancel|enough|quiet|hold on|shut up|never ?mind|forget it)\b/gi
+
+/**
+ * Is this, heard while he is talking, really you cutting in?
+ *
+ * Chrome's built-in recogniser gets the raw microphone — none of the page's
+ * echo cancellation — so on laptop speakers it transcribes his whole answer,
+ * badly. Misheard, his words slip past the echo check ("Searching." arrived as
+ * "searching golden golden") and two of them used to count as an interruption,
+ * so he kept cutting himself off mid-sentence.
+ *
+ * So by default only a deliberate word interrupts — "Jarvis", "stop", "wait" —
+ * and only one he is not saying himself right now. VITE_BARGE_IN=any brings
+ * back interrupting with any speech, which is fine on headphones.
+ */
+function isBargeIn(heard: string): boolean {
+  const mine = new Set(norm(speakingNow()).split(' '))
+  for (const m of heard.matchAll(BARGE)) {
+    const words = norm(m[0]).split(' ')
+    if (!words.every((w) => mine.has(w))) return true
+  }
+  if (BARGE_IN !== 'any') return false
+  const words = heard.split(/\s+/).filter(Boolean).length
+  return words >= 3 && !isEcho(heard, speakingNow())
+}
 
 /**
  * Words too common to be evidence of anything.
@@ -719,32 +749,38 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       return
     }
 
+    // While he is talking and you have not cut in, everything this engine hears
+    // is presumed to be him. It used to be kept in `settled` anyway, and once he
+    // finished — the echo window long expired — it went out as YOUR next turn:
+    // his "Searching." came back as "searching golden golden". Nothing heard in
+    // guard mode is kept unless it is the interruption itself.
+    if (mode === 'guard' && !barged) {
+      const full = `${settled}${fresh} ${interim}`.replace(/\s+/g, ' ').trim()
+      settled = ''
+      if (!isBargeIn(full)) {
+        interim = ''
+        return
+      }
+      const since = speakingSince()
+      if (since && Date.now() - since < SELF_GUARD_MS) {
+        diag.selfGuarded++
+        interim = ''
+        return
+      }
+      settled = fresh
+      started = true
+      barged = true
+      h.onSpeechStart()
+      diag.dropped = ''
+      h.onPartial(full)
+      bumpSilence()
+      return
+    }
+
     settled += fresh
     const full = `${settled} ${interim}`.replace(/\s+/g, ' ').trim()
-    if (!started || (mode === 'guard' && !barged)) {
-      const words = full.split(/\s+/).filter(Boolean).length
-      if (mode === 'guard') {
-        // An override word cuts through everything below it — "stop" has to
-        // work on the first syllable or it is not a stop button.
-        if (!OVERRIDE.test(full)) {
-          // His own first syllable, same as the premium path. This engine has
-          // no energy gate, so without the clock the only defence is the word
-          // count below, and a single clear word is exactly what leaks first.
-          const since = speakingSince()
-          if (since && Date.now() - since < SELF_GUARD_MS) {
-            diag.selfGuarded++
-            return
-          }
-          // Two words before this engine believes an interruption. The energy
-          // path can be instant because it triggers on loudness the canceller
-          // has already had a pass at; here the evidence is a transcript of
-          // audio that includes his own playback, and one word of that is not
-          // evidence of anything.
-          if (words < 2) return
-        }
-      }
+    if (!started) {
       started = true
-      if (mode === 'guard') barged = true
       h.onSpeechStart()
     }
     diag.dropped = ''

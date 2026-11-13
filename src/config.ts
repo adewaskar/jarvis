@@ -82,6 +82,22 @@ export const BRIDGE_WS_URL = str(import.meta.env.VITE_BRIDGE_URL) ?? 'ws://local
 export const BRIDGE_HTTP_URL = BRIDGE_WS_URL.replace(/^ws/, 'http')
 
 /**
+ * How you interrupt him while he is talking, when Chrome's own recogniser is
+ * doing the listening (no ElevenLabs key).
+ *
+ *   'word' (default) — say "Jarvis", "stop" or "wait". Anything else he hears
+ *     while talking is taken to be his own voice coming back through the
+ *     speakers, which on a laptop it nearly always is.
+ *   'any' — any three words cut him off. Use it with headphones.
+ */
+export const BARGE_IN: 'word' | 'any' = choice(
+  'VITE_BARGE_IN',
+  import.meta.env.VITE_BARGE_IN,
+  ['word', 'any'] as const,
+  'word',
+)
+
+/**
  * Speech output engine.
  *
  * false (default) — the browser's own speechSynthesis. Runs on-device, so
