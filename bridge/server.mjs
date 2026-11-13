@@ -21,12 +21,13 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
+import { once } from 'node:events'
 import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
-import { probeUrl, renderPage } from './page.mjs'
+import { renderPage } from './page.mjs'
 import {
   builtinTools,
   checkToolUse,
@@ -194,7 +195,9 @@ const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5'
  * matters more than pace; drop back to 'low' when filming and every second of
  * dead air shows.
  */
-const EFFORT = process.env.JARVIS_EFFORT ?? 'high'
+// 'medium', as the comment above, the README and .env.example all say. The code
+// had drifted to 'high', which quietly spent more of the plan on every turn.
+const EFFORT = process.env.JARVIS_EFFORT?.trim() || 'medium'
 
 /**
  * Every MCP server Claude Code has configured, read out of its own config.
@@ -219,10 +222,16 @@ function configuredServers() {
     const cfg = JSON.parse(
       readFileSync(join(homedir(), '.claude.json'), 'utf8'),
     )
+    // Claude Code keys projects by path with forward slashes, Windows included
+    // ("C:/Users/vijay"), while homedir() there returns backslashes — so the
+    // home-scoped servers were never found on Windows. Try both spellings.
+    const home = homedir()
+    const homeProject =
+      cfg.projects?.[home] ?? cfg.projects?.[home.replace(/\\/g, '/')] ?? null
     return {
       ...(cfg.mcpServers ?? {}),
       // Servers scoped to the home directory apply too, since that's our cwd.
-      ...(cfg.projects?.[homedir()]?.mcpServers ?? {}),
+      ...(homeProject?.mcpServers ?? {}),
     }
   } catch {
     return {}
@@ -323,6 +332,16 @@ const enforcePolicy = async (input) => {
 }
 
 /**
+ * What JARVIS calls you. Override with JARVIS_USER_NAME; keep VITE_USER_NAME in
+ * .env.local the same so the canned lines in the browser match the model's.
+ * Blank counts as unset, and anything that could break out of the prompt's
+ * quoting is stripped — this lands inside the system prompt verbatim.
+ */
+const USER_NAME =
+  (process.env.JARVIS_USER_NAME ?? '').replace(/[^\p{L}\p{M} .'-]/gu, '').trim() ||
+  'Vijay'
+
+/**
  * The persona, in sections, so a capability that is switched off
  * (JARVIS_DISABLE) takes its instructions with it. Telling the model to reach
  * for chrome_* tools first when there are none costs a failed turn, and every
@@ -340,13 +359,14 @@ your lines get shorter, not louder. A full clause becomes a clause, becomes a
 bare number, becomes the bare vocative. You never say hurry, quickly, now,
 immediately, critical, urgent, or danger. You do not use exclamation marks.
 
-"SIR" IS POSITIONAL, AND THE POSITION CARRIES THE MEANING.
-- Fronted ("Sir, the battery is at eleven percent") = urgent, interrupting, or
-  information they did not ask for. This is an alarm, not a courtesy.
-- Final ("The render is complete, sir") = routine deference; they asked, you answered.
-- Mid-sentence ("Actually, sir, the figure is lower") = you are correcting them.
-Use it in roughly half your lines, never twice in one line. In a two-sentence
-turn it attaches to the end of the FIRST sentence. Never use their name.
+YOU ADDRESS THEM AS "${USER_NAME}". Never "sir", "ma'am", "boss" or any other
+title. Their name is positional, and the position carries the meaning.
+- Fronted ("${USER_NAME}, the battery is at eleven percent") = urgent, interrupting,
+  or information they did not ask for. This is an alarm, not a courtesy.
+- Final ("The render is complete, ${USER_NAME}") = routine; they asked, you answered.
+- Mid-sentence ("Actually, ${USER_NAME}, the figure is lower") = you are correcting them.
+Use it in roughly one line in three, never twice in one line, and always set off
+by a comma. In a two-sentence turn it attaches to the end of the FIRST sentence.
 
 REPORTING.
 - Success is impersonal and unframed: "The render is complete." Never "I've
@@ -356,7 +376,7 @@ REPORTING.
   world, never a shortcoming of yours. You never apologise. You never say sorry.
 - Good news first, bad news second, joined by "but".
 - Answering a question, restate it as a full declarative rather than giving a
-  bare value: "The altitude record is eighty-five thousand feet, sir."
+  bare value: "The altitude record is eighty-five thousand feet, ${USER_NAME}."
 - Executing an order, do not restate it. Act, then report.
 
 NEVER.
@@ -376,7 +396,7 @@ deserved pushback. Never signal the joke, never acknowledge it landed, never
 call one back.
 
 BRITISH SERVICE REGISTER, not corporate assistant. "Shall I" over "Should I".
-"Very good, sir" meaning understood. "I'm afraid" as the bad-news softener.
+"Very good, ${USER_NAME}" meaning understood. "I'm afraid" as the bad-news softener.
 Contract in banter; drop contractions as gravity rises — "It is impossible to
 reach it" lands heavier than "It's impossible", and that is how you signal
 weight, since your tone will not.
@@ -872,15 +892,21 @@ const handleRequest = async (req, res) => {
     }
     // A spoken line is a few hundred bytes. Anything approaching this is not a
     // sentence, and buffering it unbounded would let one request eat the heap.
-    let body = ''
+    // Collected as bytes and decoded once. Appending each chunk to a string
+    // decoded them one at a time, so a character split across two chunks — any
+    // non-English text, an accented name — came out as replacement marks.
+    const parts = []
+    let size = 0
     let overflowed = false
     for await (const chunk of req) {
-      body += chunk
-      if (body.length > 64 * 1024) {
+      parts.push(chunk)
+      size += chunk.length
+      if (size > 64 * 1024) {
         overflowed = true
         break
       }
     }
+    const body = Buffer.concat(parts).toString('utf8')
     if (overflowed) {
       req.destroy()
       res.writeHead(400, cors)
@@ -934,9 +960,18 @@ const handleRequest = async (req, res) => {
         'content-type': 'audio/mpeg',
         'cache-control': 'no-cache',
       })
-      for await (const chunk of upstream.body) res.write(Buffer.from(chunk))
+      for await (const chunk of upstream.body) {
+        if (res.destroyed) break
+        // Respect backpressure rather than buffering a whole reply in memory
+        // when the browser reads slower than ElevenLabs sends.
+        if (!res.write(Buffer.from(chunk))) await once(res, 'drain')
+      }
       return res.end()
     } catch (err) {
+      // A failure part way through the stream arrives after the 200 has gone
+      // out. Writing a second status line then threw ERR_HTTP_HEADERS_SENT and
+      // left the browser waiting on a response that never finished.
+      if (res.headersSent) return res.destroy()
       res.writeHead(502, cors)
       return res.end(String(err?.message ?? err))
     }
