@@ -1,0 +1,58 @@
+/**
+ * Test the full voice pipeline via browser
+ * Open in browser and run in console to verify voice flow
+ */
+(async function() {
+  console.log('=== Voice Pipeline Test ===');
+  
+  // Check environment
+  console.log('VITE_WHISPER_HOST:', import.meta.env.VITE_WHISPER_HOST);
+  
+  // Check bridge capabilities
+  try {
+    const bridgeResp = await fetch('http://127.0.0.1:8787/health');
+    const bridgeCaps = await bridgeResp.json();
+    console.log('Bridge caps:', bridgeCaps);
+    
+    // Check whisper server
+    const whisperUrl = import.meta.env.VITE_WHISPER_HOST;
+    if (whisperUrl) {
+      const whResp = await fetch(`${whisperUrl}/health`);
+      console.log('Whisper health:', whResp.ok ? 'OK' : 'FAILED');
+    }
+    
+    // Load voice module
+    const { diag, startVoice } = await import('./src/lib/voice.ts');
+    console.log('Initial diag:', JSON.stringify(diag));
+    
+    // Start voice
+    const voice = await startVoice({
+      onWake: (cmd) => console.log('WAKE:', cmd),
+      onUtterance: (text) => console.log('UTTERANCE:', text),
+      onPartial: (text) => console.log('PARTIAL:', text),
+      onSpeechStart: () => console.log('SPEECH_START'),
+      onModeChange: (mode) => console.log('MODE_CHANGE:', mode),
+      onError: (err) => console.error('VOICE_ERROR:', err)
+    });
+    
+    console.log('Voice started. Diag after start:', JSON.stringify({
+      engine: voice.diag.engine,
+      running: voice.diag.running,
+      networkErrors: voice.diag.networkErrors
+    }));
+    
+    // Wait a bit and check
+    setTimeout(() => {
+      console.log('Voice after 3s:', JSON.stringify({
+        engine: voice.diag.engine,
+        running: voice.diag.running,
+        sessions: voice.diag.sessions,
+        heard: voice.diag.heard
+      }));
+      voice.stop();
+    }, 3000);
+    
+  } catch(e) {
+    console.error('Test failed:', e);
+  }
+})();

@@ -3,6 +3,7 @@ import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startVad, type Vad } from './vad'
 import { caps } from './capabilities'
+import { getLanguage } from './i18n'
 
 /**
  * The voice loop.
@@ -55,6 +56,7 @@ export type Voice = {
   stop: () => void
   /** True while a recogniser is actually running. */
   live: () => boolean
+  diag: typeof diag
 }
 
 // ---------------------------------------------------------------------------
@@ -72,23 +74,39 @@ const WAKE_DEBOUNCE = 1500
  * in. The negative lookahead keeps possessives ("Jarvis's job") from waking him.
  *
  * The alternates are not padding. "Jarvis" is not in a general dictation
- * model's high-frequency vocabulary, and Chrome routinely returns Travis,
- * Jervis, Jarvys or Java's for a perfectly clear utterance — every one of which
- * used to be silently discarded, so the wake word "just didn't work" with no
- * indication why. Better a rare false wake than a name that does not answer.
- */
-const WAKE =
-  /\b(?:hey|hi|ok|okay|yo)?\s*(?:jarvis|jarvys|jervis|jarvis's|travis|jarviss|java's|jarv)\b(?!'s)/i
+  * model's high-frequency vocabulary, and Chrome routinely returns Travis,
+  * Jervis, Jarvys or Java's for a perfectly clear utterance — every one of which
+  * used to be silently discarded, so the wake word "just didn't work" with no
+  * indication why. Better a rare false wake than a name that does not answer.
+  */
+ /** Wake words in both supported languages. */
+ const EN_WAKE =
+   /\b(?:hey|hi|ok|okay|yo)?\s*(?:jarvis|jarvys|jervis|jarvis's|travis|jarviss|java's|jarv)\b(?!'s)/i
+ const PL_WAKE = /\b(?:hej|cześć|siema|halo)?\s*(?:jarvis|jarvisa|jarvisowi)\b/i
 
-/** Everything after the wake phrase, which is usually the actual command. */
-function afterWake(text: string): string {
-  const m = WAKE.exec(text)
-  if (!m) return ''
-  return text
-    .slice(m.index + m[0].length)
-    .replace(/^[\s,.:;!?-]+/, '')
-    .trim()
-}
+ /**
+  * The wake regex is the union of both languages regardless of the configured
+  * language. A user who says "hey jarvis" in English while the UI is set to
+  * Polish should not be told his own name is not his name — the two are the
+  * same person, and the recogniser is already set to whatever language the
+  * user chose. Matching both costs nothing: the wake word is distinctive
+  * enough that a false trigger on a foreign-language conversation is far
+  * less likely than the cost of missing a real wake because the language
+  * toggle was in the wrong state.
+  */
+ function getWakeRegex(): RegExp {
+   return new RegExp(`${EN_WAKE.source}|${PL_WAKE.source}`, 'i')
+ }
+
+ /** Everything after the wake phrase, which is usually the actual command. */
+ function afterWake(text: string): string {
+   const m = getWakeRegex().exec(text)
+   if (!m) return ''
+   return text
+     .slice(m.index + m[0].length)
+     .replace(/^[\s,.:;!?-]+/, '')
+     .trim()
+ }
 
 // ---------------------------------------------------------------------------
 // Assembling one utterance out of several segments
@@ -173,10 +191,10 @@ function holdFor(text: string): number {
   if (/[.!?]$/.test(text)) return 0
   if (TRAILS.test(text.trim())) return CONTINUE_MS
   if (CONTINUES.test(words[words.length - 1])) return CONTINUE_MS
-  // One or two words is usually the start of something, not the whole of it —
-  // except for the short commands that genuinely are complete.
-  if (words.length <= 2 && !OVERRIDE.test(text)) return CONTINUE_MS
-  return SETTLE_MS
+    // One or two words is usually the start of something, not the whole of it —
+    // except for the short commands that genuinely are complete.
+    if (words.length <= 2 && !getOverrideRegex().test(text)) return CONTINUE_MS
+    return SETTLE_MS
 }
 
 type Assembler = {
@@ -266,8 +284,13 @@ const norm = (s: string) =>
  * he happens to be saying. Suppressing "stop" because he just said "stop"
  * would be the single most infuriating failure this file could have.
  */
-const OVERRIDE =
+const EN_OVERRIDE =
   /\b(stop|wait|jarvis|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\b/i
+const PL_OVERRIDE = /\b(stop|czekaj|jarvis|anuluj|dość|cisza|zamknij|zapomnij|nie)\b/i
+
+function getOverrideRegex(): RegExp {
+  return getLanguage() === 'pl' ? PL_OVERRIDE : EN_OVERRIDE
+}
 
 /**
  * Words too common to be evidence of anything.
@@ -296,7 +319,7 @@ const STOP = new Set(
  */
 function isEcho(heard: string, spoken: string): boolean {
   if (!spoken) return false
-  if (OVERRIDE.test(heard)) return false
+  if (getOverrideRegex().test(heard)) return false
 
   const all = norm(heard).split(' ').filter(Boolean)
   if (!all.length) return true
@@ -358,10 +381,12 @@ export const diag = {
   /** Barge-ins suppressed because he had only just started the sentence. */
   selfGuarded: 0,
   /** Transcription failures (network, or the bridge speech proxy). */
-  restarts: 0,
-  /** Milliseconds the last transcription round-trip took. */
-  idleMs: 0,
-}
+    restarts: 0,
+    /** Milliseconds the last transcription round-trip took. */
+    idleMs: 0,
+    /** Network errors encountered (for exponential backoff). */
+    networkErrors: 0,
+  }
 
 /** Record why a transcript went nowhere. Silence always has a reason; this is
  *  the difference between debugging it and speculating about it. */
@@ -393,13 +418,31 @@ export async function startVoice(h: VoiceHandlers): Promise<Voice> {
     diag.lastError = 'mic'
     h.onError(
       err instanceof DOMException && err.name === 'NotAllowedError'
-        ? 'Microphone access denied — voice input is unavailable.'
-        : 'No microphone available.',
-    )
-    return { stop: () => {}, live: () => false }
+              ? 'Microphone access denied — voice input is unavailable.'
+              : 'No microphone available.',
+          )
+          return { stop: () => {}, live: () => false, diag }
   }
-  diag.engine = caps().stt ? 'elevenlabs' : 'browser'
-  return caps().stt ? startElevenVoice(h) : startBrowserVoice(h)
+diag.engine = caps().stt ? 'elevenlabs' : (caps().whisper ? 'whisper' : ('whisper' in window ? 'whisper' : 'browser'))
+  if (caps().stt) return startElevenVoice(h)
+  // Use local Whisper server if configured and bridge reports whisper availability
+  console.log('[Voice] caps=', JSON.stringify(caps()), 'whisperHost=', import.meta.env.VITE_WHISPER_HOST)
+  const whisperHost = import.meta.env.VITE_WHISPER_HOST || ''
+  if (whisperHost && caps().whisper) {
+    try {
+      console.log('[Voice] Checking Whisper health at', `${whisperHost}/health`)
+      const health = await fetch(`${whisperHost}/health`, { signal: AbortSignal.timeout(3000) })
+      console.log('[Voice] Whisper health response:', health.status, health.ok)
+      if (health.ok) {
+        console.log('[Voice] Using local Whisper server at', whisperHost)
+        return startWhisperVoice(h, whisperHost)
+      }
+    } catch (e) {
+      console.error('[Voice] Whisper health check failed:', e)
+    }
+  }
+  console.log('[Voice] Falling back to browser speech recognition')
+  return startBrowserVoice(h)
 }
 
 /** VAD + ElevenLabs Scribe. */
@@ -479,10 +522,12 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       }
 
       diag.heard = said
-      diag.heardAt = Date.now()
+            diag.heardAt = Date.now()
+            // Reset network error counter on successful recognition
+            if (diag.networkErrors) diag.networkErrors = 0
 
       if (mode === 'wake') {
-        if (WAKE.test(said) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+              if (getWakeRegex().test(said) && Date.now() - lastWake > WAKE_DEBOUNCE) {
           lastWake = Date.now()
           diag.wakes++
           diag.dropped = ''
@@ -575,15 +620,16 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
   }, 200)
 
   return {
-    stop: () => {
-      clearInterval(guardPoll)
-      assemble.cancel()
-      vad?.stop()
-      diag.running = false
-    },
-    live: () => vad?.live() ?? false,
+      stop: () => {
+        clearInterval(guardPoll)
+        assemble.cancel()
+        vad?.stop()
+        diag.running = false
+      },
+      live: () => vad?.live() ?? false,
+      diag,
+    }
   }
-}
 
 /* -------------------------------------------------------------------------- */
 /* Browser fallback: SpeechRecognition                                        */
@@ -604,7 +650,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
   if (!Ctor) {
     h.onError('This browser has no speech recognition — use Chrome or Edge, or add an ElevenLabs key.')
-    return { stop: () => {}, live: () => false }
+        return { stop: () => {}, live: () => false, diag }
   }
 
   let stopped = false
@@ -656,10 +702,12 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       return
     }
     diag.heard = text
-    diag.heardAt = Date.now()
+        diag.heardAt = Date.now()
+        // Reset network error counter on successful recognition
+        if (diag.networkErrors) diag.networkErrors = 0
     if (mode === 'wake') {
-      assemble.cancel()
-      if (WAKE.test(text) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+          assemble.cancel()
+          if (getWakeRegex().test(text) && Date.now() - lastWake > WAKE_DEBOUNCE) {
         lastWake = Date.now()
         diag.wakes++
         diag.dropped = ''
@@ -706,8 +754,8 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     }
 
     if (mode === 'wake') {
-      settled += fresh
-      if (WAKE.test(heard) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+          settled += fresh
+          if (getWakeRegex().test(heard) && Date.now() - lastWake > WAKE_DEBOUNCE) {
         lastWake = Date.now()
         diag.wakes++
         const trailing = afterWake(heard)
@@ -724,9 +772,9 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     if (!started || (mode === 'guard' && !barged)) {
       const words = full.split(/\s+/).filter(Boolean).length
       if (mode === 'guard') {
-        // An override word cuts through everything below it — "stop" has to
-        // work on the first syllable or it is not a stop button.
-        if (!OVERRIDE.test(full)) {
+              // An override word cuts through everything below it — "stop" has to
+              // work on the first syllable or it is not a stop button.
+              if (!getOverrideRegex().test(full)) {
           // His own first syllable, same as the premium path. This engine has
           // no energy gate, so without the clock the only defence is the word
           // count below, and a single clear word is exactly what leaks first.
@@ -756,40 +804,59 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
   }
 
   const spin = () => {
-    if (stopped || running) return
-    rec = new Ctor()
-    rec.continuous = true
-    rec.interimResults = true
-    rec.lang = 'en-GB'
-    rec.onstart = () => {
-      running = true
-      diag.running = true
-      diag.sessions++
-      touch()
-    }
-    rec.onresult = onResult
-    rec.onerror = (ev: any) => {
-      diag.lastError = String(ev.error ?? '')
-      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
-        stopped = true
+      if (stopped || running) return
+      rec = new Ctor()
+      rec.continuous = true
+      rec.interimResults = true
+      const lang = getLanguage() === 'pl' ? 'pl-PL' : 'en-GB'
+      rec.lang = lang
+      console.log('[Voice] Starting SpeechRecognition:', { lang, continuous: true, interim: true })
+      rec.onstart = () => {
+        running = true
+        diag.running = true
+        diag.sessions++
+        touch()
+        console.log('[Voice] SpeechRecognition STARTED')
+      }
+      rec.onresult = (ev: any) => {
+        console.log('[Voice] onresult:', ev.results.length, 'results')
+        onResult(ev)
+      }
+      rec.onerror = (ev: any) => {
+        const err = String(ev.error ?? '')
+        diag.lastError = err
+        console.log('[Voice] onerror:', err)
+        // Network errors (Chrome Speech API needs Google servers) — back off instead of hammering
+        if (err === 'network' || err === 'service-not-allowed') {
+          diag.networkErrors = (diag.networkErrors ?? 0) + 1
+          return
+        }
+        if (err === 'not-allowed') {
+          stopped = true
+          diag.running = false
+          h.onError('Microphone access was refused — voice input is unavailable.')
+        }
+      }
+      rec.onend = () => {
+        running = false
         diag.running = false
-        h.onError('Microphone access was refused — voice input is unavailable.')
+        touch()
+        rec = null
+        console.log('[Voice] SpeechRecognition ENDED')
+        if (!stopped) {
+          // Exponential backoff for network errors: 80ms * 2^n (capped at 10s)
+          const netErrors = diag.networkErrors ?? 0
+          const delay = netErrors > 0 ? Math.min(80 * Math.pow(2, netErrors - 1), 10000) : 80
+          setTimeout(spin, delay)
+        }
+      }
+      try {
+        rec.start()
+      } catch {
+        running = false
+        setTimeout(spin, 250)
       }
     }
-    rec.onend = () => {
-      running = false
-      diag.running = false
-      touch()
-      rec = null
-      if (!stopped) setTimeout(spin, 80)
-    }
-    try {
-      rec.start()
-    } catch {
-      running = false
-      setTimeout(spin, 250)
-    }
-  }
 
   spin()
 
@@ -813,19 +880,123 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     spin()
   }, 5000)
 
+    return {
+      stop: () => {
+        stopped = true
+        clearInterval(health)
+        clearSilence()
+        assemble.cancel()
+        diag.running = false
+        try {
+          rec?.abort()
+        } catch {
+          /* noop */
+        }
+      },
+      live: () => running,
+      diag,
+    }
+  }
+
+/**
+ * Local Whisper STT via HTTP server (whisper_server.py).
+ * Records in 2s chunks while audio is present, sends each chunk for transcription.
+ */
+async function startWhisperVoice(h: VoiceHandlers, whisperHost: string): Promise<Voice> {
+  const stream = await getMic()
+  if (!stream) {
+    h.onError('No microphone available.')
+    return { stop: () => {}, live: () => false, diag }
+  }
+
+  let stopped = false
+  let running = false
+  // lastWake, settled, interim, started, barged not needed for Whisper path
+  let silenceTimer: ReturnType<typeof setTimeout> | null = null
+
+  const assemble = makeAssembler({
+    emit: (text) => {
+      diag.dropped = ''
+      diag.accepted++
+      diag.holding = ''
+      h.onUtterance(text)
+    },
+    partial: (text) => h.onPartial(text),
+  })
+
+  const clearSilence = () => {
+    if (silenceTimer) clearTimeout(silenceTimer)
+    silenceTimer = null
+  }
+
+  // Transcribe a recorded chunk via local Whisper
+  const transcribeChunk = async (blob: Blob) => {
+    if (stopped) return
+    try {
+      console.log('[Whisper] Sending chunk, size:', blob.size, 'bytes')
+      const formData = new FormData()
+      formData.append('audio', blob, 'chunk.wav')
+
+      const resp = await fetch(`${whisperHost}/stt`, { method: 'POST', body: formData })
+      if (!resp.ok) {
+        console.error('[Whisper] Server error:', resp.status)
+        return
+      }
+      const data = await resp.json()
+      if (data.text && !stopped) {
+        console.log('[Whisper] Heard:', data.text)
+        assemble.feed(data.text.trim(), true)
+        // Check for wake words after endpointing delay
+        setTimeout(() => assemble.feed(data.text.trim(), false), 1500)
+      }
+    } catch (e) {
+      console.error('[Whisper] Error:', e)
+    }
+  }
+
+  // Start recording with MediaRecorder
+  const startRecording = () => {
+    if (stopped) return
+    running = true
+    diag.running = true
+    diag.engine = 'whisper'
+
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+    const chunks: Blob[] = []
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data)
+    }
+
+    mediaRecorder.onstop = async () => {
+      if (chunks.length === 0) {
+        // No audio captured - restart immediately
+        setTimeout(startRecording, 100)
+        return
+      }
+      const blob = new Blob(chunks, { type: 'audio/webm' })
+      await transcribeChunk(blob)
+      // Restart after short pause
+      if (!stopped) {
+        setTimeout(startRecording, 100)
+      }
+    }
+
+    mediaRecorder.start(2000) // Record in 2-second chunks
+    console.log('[Whisper] Recording started')
+  }
+
+  startRecording()
+
   return {
     stop: () => {
       stopped = true
-      clearInterval(health)
       clearSilence()
       assemble.cancel()
       diag.running = false
-      try {
-        rec?.abort()
-      } catch {
-        /* noop */
-      }
+      console.log('[Whisper] Stopped')
     },
     live: () => running,
+    diag,
   }
 }

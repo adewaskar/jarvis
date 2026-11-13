@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>JARVIS Voice Test</title>
+  <style>
+    body { background: #111; color: #0f0; font-family: monospace; padding: 20px; }
+    #status { margin-bottom: 20px; }
+    .ok { color: #0f0; }
+    .err { color: #f00; }
+    #log { white-space: pre-wrap; max-height: 60vh; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h2>JARVIS Voice Debug</h2>
+  <div id="status">Ready</div>
+  
+  <div style="display:flex; gap:10px; margin:15px 0;">
+    <button onclick="window.testVoice()">START VOICE TEST</button>
+    <button onclick="window.stopTest()" style="background:#f44;">STOP</button>
+  </div>
+  
+  <pre id="log"></pre>
+  
+  <script type="module">
+    let voice = null;
+    
+    function write(msg, color='') {
+      const logEl = document.getElementById('log');
+      logEl.textContent += msg + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+      if (color) console.log(`[${color}] ${msg}`);
+      else console.log(msg);
+    }
+    
+    window.testVoice = async function() {
+      const status = document.getElementById('status');
+      const log = document.getElementById('log');
+      log.textContent = '=== Voice Test Starting ===\n\n';
+      status.textContent = 'Testing...';
+      
+      try {
+        // 1. Check Whisper server
+        write('[1] Checking Whisper server...', 'info');
+        const whResp = await fetch('http://127.0.0.1:8788/health', { signal: AbortSignal.timeout(3000) });
+        if (whResp.ok) {
+          const whData = await whResp.json();
+          write(`    OK: ${JSON.stringify(whData)}`, 'success');
+        } else {
+          write(`    FAIL: HTTP ${whResp.status}`, 'error');
+          throw new Error('Whisper server not reachable');
+        }
+        
+        // 2. Check env
+        write('\n[2] Environment:', 'info');
+        write(`    VITE_WHISPER_HOST: ${import.meta.env.VITE_WHISPER_HOST || '(not set)'}`, import.meta.env.VITE_WHISPER_HOST ? 'success' : 'error');
+        write(`    MODE: ${import.meta.env.MODE}`);
+        
+        // 3. Load voice module
+        write('\n[3] Loading voice module...', 'info');
+        const voiceModule = await import('../src/lib/voice.ts');
+        write(`    Module loaded`, 'success');
+        
+        // 4. Get mic
+        write('\n[4] Requesting microphone access...', 'info');
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+        });
+        write(`    Mic granted! Sample rate: ${stream.getAudioTracks()[0].getSettings().sampleRate}Hz`, 'success');
+        
+        // 5. Start voice recognition
+        write('\n[5] Starting voice recognition...', 'info');
+        voice = await voiceModule.startVoice({
+          mode: () => 'wake',
+          onWake: (cmd) => write(`    >>> WAKE: "${cmd}"`, 'success'),
+          onUtterance: (text) => write(`    >>> HEARD: "${text}"`, 'success'),
+          onPartial: (text) => write(`    ... partial: "${text}"`, 'info'),
+          onSpeechStart: () => write('    [SPEECH STARTED]', 'info'),
+          onModeChange: (mode) => write(`    Mode: ${mode}`, 'info'),
+          onError: (err) => write(`    ERROR: ${err}`, 'error')
+        });
+        
+        write(`\nEngine: ${voice.diag.engine}, Running: ${voice.diag.running}`, 'success');
+        write('\n[SPEAK NOW!] Listen for "Cześć Jarvis" or any command...', 'info');
+        
+        // Monitor for 20 seconds
+        await new Promise(r => setTimeout(r, 20000));
+        
+        write(`\nFinal state: ${JSON.stringify(voice.diag)}`, 'info');
+        write('\n=== Test Complete ===', 'success');
+        
+        if (voice) voice.stop();
+        status.textContent = 'Complete';
+        
+      } catch (e) {
+        write(`ERROR: ${e.message}`, 'error');
+        status.textContent = 'FAILED';
+      }
+    };
+    
+    window.stopTest = function() {
+      if (voice) {
+        voice.stop();
+        voice = null;
+        write('Stopped.', 'info');
+      }
+    };
+    
+    write('Click "START VOICE TEST" to begin.', 'info');
+    write(`Env: VITE_WHISPER_HOST=${import.meta.env.VITE_WHISPER_HOST || 'NOT SET'}`, import.meta.env.VITE_WHISPER_HOST ? 'success' : 'error');
+  </script>
+</body>
+</html>

@@ -735,15 +735,17 @@ const handleRequest = async (req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/health') {
-    // The browser reads this once at boot to decide which voice engine to use.
-    // Both premium paths ride the same ElevenLabs key, so both flags track it:
-    // with a key the app transcribes with Scribe and speaks with ElevenLabs;
-    // without one it falls back to the browser's own recogniser and voice, so a
-    // student with nothing configured still has a working assistant.
-    const eleven = Boolean(elevenKey())
-    res.writeHead(200, { ...cors, 'content-type': 'application/json' })
-    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven }))
-  }
+      // The browser reads this once at boot to decide which voice engine to use.
+      // Both premium paths ride the same ElevenLabs key, so both flags track it:
+      // with a key the app transcribes with Scribe and speaks with ElevenLabs;
+      // without one it falls back to the browser's own recogniser and voice, so a
+      // student with nothing configured still has a working assistant.
+      // Additionally, if VITE_WHISPER_HOST is set (passed via env), local Whisper STT is available.
+      const eleven = Boolean(elevenKey())
+          const whisper = Boolean(process.env.VITE_WHISPER_HOST)
+          res.writeHead(200, { ...cors, 'content-type': 'application/json' })
+          return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven, whisper }))
+    }
 
   // Serve local image files to the page. Screenshots and generated art land on
   // disk as absolute paths, and a page served over http can't read file:// —

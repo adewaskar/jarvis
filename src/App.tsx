@@ -300,12 +300,23 @@ export default function App() {
       return
     }
     const said = text.replace(LEADING_NAME, '').trim()
-    if (!said) {
-      listen(AWAIT_SPEECH_MS)
-      return
-    }
+        if (!said) {
+          listen(AWAIT_SPEECH_MS)
+          return
+        }
 
-    void respond(said)
+        // Stand-down commands. Spoken, not pressed — "Jarvis off" puts him back to
+        // sleep the same way Escape does, and a voice assistant that needs a
+        // keyboard to turn itself off is a voice assistant that stops being used.
+        if (/(?:\b(?:off|stand\s+down|good\s+night|sleep|shut\s+down|power\s+down|go\s+to\s+sleep|wyłącz\s+się|śpij|dobranoc|zamknij\s+się)\b)/i.test(
+              said,
+            )) {
+              sfx.play('done')
+              goDormant()
+              return
+            }
+
+        void respond(said)
   }
 
   const onPartial = (text: string) => {

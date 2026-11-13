@@ -97,7 +97,7 @@ export async function load(): Promise<Kokoro | null> {
       model = tts as unknown as Kokoro
       return model
     } catch (err) {
-      console.warn('[jarvis] kokoro unavailable, using the system voice:', err)
+      console.log('[Voice] kokoro unavailable, using the system voice:', err)
       lastError = String((err as Error)?.message ?? err)
       failed = true
       return null
@@ -112,8 +112,12 @@ export async function load(): Promise<Kokoro | null> {
 /** Synthesise one sentence. Returns null if the model isn't usable. */
 export async function speak(text: string): Promise<string | null> {
   const tts = await load()
-  if (!tts) return null
+  if (!tts) {
+    console.warn('[jarvis] kokoro model not loaded, failed:', lastError || 'unknown')
+    return null
+  }
   try {
+    console.log('[jarvis] kokoro generating speech for:', text.slice(0, 50))
     const audio = await tts.generate(text, {
       voice,
       // Slightly under natural pace — the character is never hurried, and the
@@ -121,7 +125,9 @@ export async function speak(text: string): Promise<string | null> {
       speed: 0.95,
     })
     failures = 0
-    return URL.createObjectURL(audio.toBlob())
+    const url = URL.createObjectURL(audio.toBlob())
+    console.log('[jarvis] kokoro generated', url.length, 'bytes')
+    return url
   } catch (err) {
     // Surfaced rather than swallowed: a silent null here just looks like the
     // voice quietly reverting to the system one with no explanation.

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>JARVIS Simple Voice Test</title>
+  <style>
+    body { background: #111; color: #eee; font-family: monospace; padding: 20px; }
+    button { font-size: 16px; padding: 10px 20px; margin: 5px; cursor: pointer; }
+    #status { font-size: 18px; margin: 20px 0; padding: 10px; border-radius: 4px; }
+    .listening { background: #4a4; }
+    .error { background: #a44; }
+    pre { background: #000; padding: 10px; height: 300px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h1>JARVIS Simple Voice Test</h1>
+  <div id="status">Click START to begin</div>
+  
+  <button onclick="startTest()">▶ START TEST</button>
+  <button onclick="stopTest()">■ STOP</button>
+  <button onclick="clearLog()">⌫ CLEAR</button>
+  
+  <pre id="log"></pre>
+  
+  <script>
+    const WHISPER_HOST = 'http://127.0.0.1:8788';
+    let mediaRecorder = null;
+    let audioChunks = [];
+    
+    function log(msg) {
+      const logEl = document.getElementById('log');
+      logEl.textContent += `[${new Date().toISOString().substr(11, 12)}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
+    }
+    
+    async function startTest() {
+      const status = document.getElementById('status');
+      status.textContent = 'Requesting microphone...';
+      status.className = '';
+      
+      try {
+        // Get microphone access
+        log('Requesting microphone access...');
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true
+          } 
+        });
+        
+        log('✓ Microphone granted');
+        log(`  Settings: ${JSON.stringify(stream.getAudioTracks()[0].getSettings())}`);
+        
+        // Check Whisper server health
+        log('Checking Whisper server...');
+        const whResp = await fetch(`${WHISPER_HOST}/health`, { signal: AbortSignal.timeout(3000) });
+        if (whResp.ok) {
+          const whData = await whResp.json();
+          log(`✓ Whisper server healthy: ${JSON.stringify(whData)}`);
+        } else {
+          throw new Error(`Whisper server returned ${whResp.status}`);
+        }
+        
+        // Start recording
+        status.textContent = '🎤 Listening... Speak now!';
+        status.className = 'listening';
+        log('Recording started. Speaking into microphone...');
+        
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        audioChunks = [];
+        
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            audioChunks.push(e.data);
+            log(`  Captured chunk: ${e.data.size} bytes`);
+          }
+        };
+        
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(audioChunks, { type: 'audio/webm' });
+          log(`\nTotal audio: ${blob.size} bytes`);
+          
+          // Send to Whisper
+          status.textContent = 'Transcribing...';
+          log('Sending to Whisper server...');
+          
+          const formData = new FormData();
+          formData.append('audio', blob, 'audio.webm');
+          
+          try {
+            const resp = await fetch(`${WHISPER_HOST}/stt`, { method: 'POST', body: formData });
+            if (!resp.ok) {
+              throw new Error(`HTTP ${resp.status}`);
+            }
+            const data = await resp.json();
+            log(`\n✦ TRANSCRIBED: "${data.text}"`);
+            log(`  Language: ${data.language}`);
+            status.textContent = `Heard: ${data.text}`;
+          } catch (e) {
+            log(`\n✗ Transcription error: ${e.message}`);
+            status.textContent = 'Error';
+            status.className = 'error';
+          }
+        };
+        
+        // Record for 10 seconds
+        mediaRecorder.start(1000); // Collect 1 second chunks
+        
+        // Auto-stop after 10 seconds
+        setTimeout(() => {
+          if (mediaRecorder.state === 'recording') {
+            log('\nStopping recording...');
+            mediaRecorder.stop();
+            stream.getTracks().forEach(track => track.stop());
+            status.textContent = 'Done! See logs above.';
+          }
+        }, 10000);
+        
+      } catch (e) {
+        log(`✗ ERROR: ${e.message}`);
+        status.textContent = 'Error - see logs';
+        status.className = 'error';
+      }
+    }
+    
+    function stopTest() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        log('\nManually stopped.');
+      }
+    }
+    
+    function clearLog() {
+      document.getElementById('log').textContent = '';
+    }
+    
+    // Initial state
+    log('JARVIS Simple Voice Test v1');
+    log(`Whisper host: ${WHISPER_HOST}`);
+    log('Click START to test voice recognition.');
+  </script>
+</body>
+</html>

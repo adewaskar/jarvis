@@ -25,3 +25,16 @@ dist-ssr
 
 # Copied out of node_modules by scripts/start.mjs — 34MB of build output.
 public/mediapipe/
+
+# Scratch / debug scripts from STT & TTS experimentation (not part of the app).
+debug_whisper.py
+test_real_voice.py
+test_transcription.py
+test_vowel.py
+test_whisper_upload.py
+test-whisper-stt.cjs
+test-whisper-upload.cjs
+test-whisper.js
+test-whisper.mjs
+test-whisper.py
+whisper_server.py

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>JARVIS Voice Test</title>
+  <style>
+    body { background: #0a0a0a; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
+    h2 { color: #0ff; border-bottom: 1px solid #0ff; padding-bottom: 5px; }
+    .section { margin: 15px 0; padding: 10px; background: #111; border-left: 3px solid #0f0; }
+    .error { color: #f44; }
+    .success { color: #4f4; }
+    .info { color: #4af; }
+    button { background: #0f0; color: #000; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #4f4; }
+    button.stop { background: #f44; }
+    #status { font-size: 14px; margin-bottom: 10px; }
+    pre#log { background: #000; padding: 15px; height: 400px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #333; }
+    .diag-box { display: flex; gap: 20px; margin-top: 15px; }
+    .diag-item { background: #111; padding: 10px; border: 1px solid #333; min-width: 100px; }
+    .diag-label { color: #888; font-size: 11px; }
+    .diag-value { color: #0f0; font-size: 16px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>JARVIS Voice Recognition Debug</h2>
+  <div id="status">Ready — click START to begin test</div>
+  
+  <div class="diag-box">
+    <div class="diag-item">
+      <div class="diag-label">ENGINE</div>
+      <div class="diag-value" id="engine">-</div>
+    </div>
+    <div class="diag-item">
+      <div class="diag-label">RUNNING</div>
+      <div class="diag-value" id="running">NO</div>
+    </div>
+    <div class="diag-item">
+      <div class="diag-label">SESSIONS</div>
+      <div class="diag-value" id="sessions">0</div>
+    </div>
+    <div class="diag-item">
+      <div class="diag-label">HEARD</div>
+      <div class="diag-value" id="heard">-</div>
+    </div>
+  </div>
+  
+  <div style="margin: 15px 0;">
+    <button onclick="window.testVoice()">▶ START VOICE TEST</button>
+    <button onclick="window.stopTest()" class="stop">■ STOP</button>
+    <button onclick="window.clearLog()">⌫ CLEAR LOG</button>
+  </div>
+  
+  <pre id="log"></pre>
+  
+  <script type="module">
+    let voice = null;
+    let diagInterval = null;
+    
+    function log(msg, type = '') {
+      const logEl = document.getElementById('log');
+      const ts = new Date().toISOString().substr(11, 12);
+      const line = `[${ts}] ${msg}`;
+      logEl.textContent += line + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(type ? `[${type.toUpperCase()}] ${msg}` : msg);
+    }
+    
+    function updateDiag() {
+      if (!voice || !voice.diag) return;
+      document.getElementById('engine').textContent = voice.diag.engine?.toUpperCase() || '-';
+      document.getElementById('running').textContent = voice.diag.running ? 'YES' : 'NO';
+      document.getElementById('sessions').textContent = voice.diag.sessions || '0';
+      document.getElementById('heard').textContent = (voice.diag.heard || '').substring(0, 20) || '-';
+      
+      // Color coding
+      document.getElementById('engine').style.color = 
+        voice.diag.engine === 'whisper' ? '#0f0' : 
+        voice.diag.engine === 'browser' ? '#ff0' : '#f44';
+        
+      document.getElementById('running').style.color = 
+        voice.diag.running ? '#0f0' : '#f44';
+    }
+    
+    window.testVoice = async function() {
+      const status = document.getElementById('status');
+      const logEl = document.getElementById('log');
+      logEl.textContent = '';
+      status.textContent = 'Initializing...';
+      status.style.color = '#4af';
+      
+      try {
+        // 1. Environment check
+        log('=' .repeat(50), 'INFO');
+        log('JARVIS Voice Recognition Test v2', 'INFO');
+        log('=' .repeat(50), 'INFO');
+        
+        const whisperHost = import.meta.env.VITE_WHISPER_HOST;
+        log(`\n[VITE CONFIG]`, 'INFO');
+        log(`  VITE_WHISPER_HOST: ${whisperHost || '(NOT SET)'}`, whisperHost ? 'SUCCESS' : 'ERROR');
+        log(`  MODE: ${import.meta.env.MODE}`, 'INFO');
+        log(`  DEV: ${import.meta.env.DEV}`, 'INFO');
+        
+        if (!whisperHost) {
+          throw new Error('VITE_WHISPER_HOST is not configured! Check .env.local');
+        }
+        
+        // 2. Service health checks
+        log(`\n[SERVICE CHECKS]`, 'INFO');
+        
+        // Whisper server
+        log(`  [1/2] Checking Whisper server at ${whisperHost}...`, 'INFO');
+        try {
+          const whResp = await fetch(`${whisperHost}/health`, { 
+            signal: AbortSignal.timeout(3000) 
+          });
+          if (whResp.ok) {
+            const whData = await whResp.json();
+            log(`      ✓ HEALTHY: ${JSON.stringify(whData)}`, 'SUCCESS');
+          } else {
+            throw new Error(`HTTP ${whResp.status}`);
+          }
+        } catch (e) {
+          throw new Error(`Whisper server unreachable: ${e.message}`);
+        }
+        
+        // Bridge
+        log(`  [2/2] Checking bridge at http://127.0.0.1:8787...`, 'INFO');
+        try {
+          const brResp = await fetch('http://127.0.0.1:8787/health', { 
+            signal: AbortSignal.timeout(3000) 
+          });
+          if (brResp.ok) {
+            const brData = await brResp.json();
+            log(`      ✓ HEALTHY: ${JSON.stringify(brData)}`, 'SUCCESS');
+          }
+        } catch (e) {
+          log(`      ⚠ Bridge error (non-critical): ${e.message}`, 'ERROR');
+        }
+        
+        // 3. Load voice module
+        log(`\n[MODULE LOADING]`, 'INFO');
+        log(`  Loading voice module from src/lib/voice.ts...`, 'INFO');
+        
+        const voiceModule = await import('../src/lib/voice.ts');
+        log(`  ✓ Module loaded successfully`, 'SUCCESS');
+        log(`  Exported functions: ${Object.keys(voiceModule).filter(k => typeof voiceModule[k] === 'function').join(', ')}`, 'INFO');
+        
+        // 4. Request microphone
+        log(`\n[MICROPHONE]`, 'INFO');
+        log(`  Requesting microphone access...`, 'INFO');
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { 
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            latency: 0
+          } 
+        });
+        
+        const track = stream.getAudioTracks()[0];
+        const settings = track.getSettings();
+        log(`  ✓ Microphone granted!`, 'SUCCESS');
+        log(`    Sample rate: ${settings.sampleRate}Hz`, 'INFO');
+        log(`    Channels: ${settings.channelCount}`, 'INFO');
+        log(`    Echo cancellation: ${settings.echoCancellation}`, 'INFO');
+        log(`    Noise suppression: ${settings.noiseSuppression}`, 'INFO');
+        
+        // 5. Start voice recognition
+        log(`\n[VOICE ENGINE]`, 'INFO');
+        log(`  Starting voice recognition...`, 'INFO');
+        
+        voice = await voiceModule.startVoice({
+          mode: () => 'wake',
+          
+          onWake: (cmd) => {
+            log(`\n    ★★ WAKE WORD RECOGNIZED: "${cmd}" ★★`, 'SUCCESS');
+            status.textContent = `WAKE: "${cmd}"`;
+            status.style.color = '#0f0';
+          },
+          
+          onUtterance: (text) => {
+            log(`    >>> HEARD: "${text}"`, 'SUCCESS');
+            status.textContent = `HEARD: "${text.substring(0, 30)}..."`;
+            status.style.color = '#0f0';
+          },
+          
+          onPartial: (text) => {
+            log(`    ... partial: "${text}"`, 'INFO');
+          },
+          
+          onSpeechStart: () => {
+            log(`    [🎤 SPEECH DETECTED]`, 'INFO');
+            status.textContent = '🎤 Listening...';
+            status.style.color = '#ff0';
+          },
+          
+          onModeChange: (mode) => {
+            log(`    Mode: ${mode}`, 'INFO');
+          },
+          
+          onError: (err) => {
+            log(`    ERROR: ${err}`, 'ERROR');
+            status.textContent = `Error: ${err}`;
+            status.style.color = '#f44';
+          }
+        });
+        
+        // Start diagnostic monitoring
+        diagInterval = setInterval(updateDiag, 200);
+        updateDiag();
+        
+        log(`\n  ✓ Voice engine started!`, 'SUCCESS');
+        log(`    Engine: ${voice.diag.engine}`, 'INFO');
+        log(`    Running: ${voice.diag.running}`, 'INFO');
+        log(``, 'INFO');
+        log(`═══════════════════════════════════════════════`, 'SUCCESS');
+        log(`  NOW SPEAK INTO YOUR MICROPHONE`, 'SUCCESS');
+        log(`  Try saying: "Cześć Jarvis" or any command`, 'INFO');
+        log(`  The test will run for 20 seconds`, 'INFO');
+        log(`═══════════════════════════════════════════════`, 'SUCCESS');
+        log(``, 'INFO');
+        
+        status.textContent = '🎤 Listening... Speak now!';
+        status.style.color = '#0f0';
+        
+        // Wait and monitor
+        await new Promise(r => setTimeout(r, 20000));
+        
+        // Stop
+        log(`\n[TEST COMPLETE]`, 'INFO');
+        if (voice) voice.stop();
+        clearInterval(diagInterval);
+        
+        updateDiag();
+        log(`\nFinal state:`, 'INFO');
+        log(`  Engine: ${voice?.diag?.engine}`, 'INFO');
+        log(`  Running: ${voice?.diag?.running}`, 'INFO');
+        log(`  Sessions: ${voice?.diag?.sessions}`, 'INFO');
+        log(`  Accepted: ${voice?.diag?.accepted}`, 'INFO');
+        log(`  Heard: "${voice?.diag?.heard || ''}"`, 'INFO');
+        log(`  Dropped: ${voice?.diag?.dropped || ''}`, 'INFO');
+        log(`  Network errors: ${voice?.diag?.networkErrors || 0}`, 'INFO');
+        
+        status.textContent = 'Test complete — see logs below';
+        status.style.color = '#4af';
+        
+      } catch (e) {
+        log(`\n✗ TEST FAILED: ${e.message}`, 'ERROR');
+        log(e.stack, 'ERROR');
+        status.textContent = 'FAILED';
+        status.style.color = '#f44';
+      }
+    };
+    
+    window.stopTest = function() {
+      if (voice) {
+        voice.stop();
+        voice = null;
+        clearInterval(diagInterval);
+        log('\nManually stopped.', 'INFO');
+        document.getElementById('status').textContent = 'Stopped';
+        document.getElementById('status').style.color = '#888';
+      }
+    };
+    
+    window.clearLog = function() {
+      document.getElementById('log').textContent = '';
+    };
+    
+    // Initial state
+    log('=== JARVIS Voice Recognition Debug Tool ===', 'INFO');
+    log('', 'INFO');
+    log('Environment:', 'INFO');
+    log(`  VITE_WHISPER_HOST: ${import.meta.env.VITE_WHISPER_HOST || '❌ NOT SET'}`, 
+        import.meta.env.VITE_WHISPER_HOST ? 'SUCCESS' : 'ERROR');
+    log(`  MODE: ${import.meta.env.MODE}`, 'INFO');
+    log('', 'INFO');
+    log('Click "START VOICE TEST" to begin testing.', 'INFO');
+    log('You will need to grant microphone permission.', 'INFO');
+  </script>
+</body>
+</html>
