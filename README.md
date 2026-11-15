@@ -25,8 +25,9 @@ can have — Node.js and Chrome. That's the whole list.
   or the platform installer at <https://docs.claude.com/en/docs/claude-code> —
   then run `claude` once and complete login. The bridge reuses that login. **No
   API key**, and usage is billed to your existing Claude account.
-- **Node.js 20 or newer** — free, one installer from <https://nodejs.org>. This
-  is a Node web app, so it is the one unavoidable tool.
+- **Node.js 20.19+ or 22.12+** (the current LTS is fine) — free, one installer
+  from <https://nodejs.org>. This is a Node web app, so it is the one
+  unavoidable tool. An older 20.x or 22.x installs and then fails to start.
 - **Google Chrome or Microsoft Edge**, in a **real browser window** — not an
   embedded preview pane. Preview panes (including the one inside editors and
   Claude Code) block microphone access, so the page loads and looks right but
@@ -108,9 +109,9 @@ WebSocket (plus a few HTTP endpoints) on `ws://localhost:8787`.
 rest. The bridge can. And because it is the Agent SDK, it authenticates off your
 existing Claude Code login: no API key, billed to that same Claude account.
 
-**The model.** `claude-opus-5` at effort `medium` by default. Override with the
+**The model.** `claude-opus-5` at effort `high` by default. Override with the
 `JARVIS_MODEL` and `JARVIS_EFFORT` environment variables. On startup the bridge
-prints its choice, e.g. `[jarvis] model claude-opus-5 · effort medium`.
+prints its choice, e.g. `[jarvis] model claude-opus-5 · effort high`.
 
 ### The voice pipeline
 
@@ -232,7 +233,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_BRIDGE_HOST` | `127.0.0.1` | Interface to listen on. Any other address puts the agent on your network |
 | `JARVIS_ALLOWED_HOSTS` | none | Extra hostnames the bridge answers to; a request for any other name gets a 403 |
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
-| `JARVIS_EFFORT` | `medium` | Reasoning effort |
+| `JARVIS_EFFORT` | `high` | Reasoning effort |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
 | `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
 | `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
