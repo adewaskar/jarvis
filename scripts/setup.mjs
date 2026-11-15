@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { NODE_RANGE, loginState, nodeVersionOk } from './checks.mjs';
 
 const tick = '  ok  ';
 const warn = ' note ';
@@ -24,15 +25,13 @@ console.log('JARVIS preflight — checking your machine (nothing is changed)');
 console.log('------------------------------------------------------------');
 
 // --- Node version --------------------------------------------------------
-try {
-  const major = Number(process.versions.node.split('.')[0]);
-  if (Number.isFinite(major) && major >= 20) {
-    line(tick, `Node.js ${process.versions.node} (20+ required).`);
-  } else {
-    line(warn, `Node.js ${process.versions.node} is below 20. Please upgrade — the bridge needs Node 20 or newer.`);
-  }
-} catch {
-  line(warn, 'Could not read the Node.js version. JARVIS needs Node 20 or newer.');
+// Not just the major version: Vite needs 20.19+ or 22.12+, and an older 20.x
+// or 22.x installs fine and then fails at `npm start`.
+if (nodeVersionOk(process.versions.node)) {
+  line(tick, `Node.js ${process.versions.node} (needs ${NODE_RANGE}).`);
+} else {
+  line(warn, `Node.js ${process.versions.node} is too old or unsupported — JARVIS needs ${NODE_RANGE}.`);
+  line(info, 'Install the current LTS from https://nodejs.org, then run `npm ci` again.');
 }
 
 // --- Claude CLI on PATH ---------------------------------------------------
@@ -51,6 +50,27 @@ if (!claudeFound) {
   line(info, 'Install it: npm install -g @anthropic-ai/claude-code');
   line(info, '  (or the platform installer at https://docs.claude.com/en/docs/claude-code)');
   line(info, 'Then run `claude` once and complete login. The bridge uses that login — no API key needed.');
+}
+
+// --- Claude login ----------------------------------------------------------
+// Without a login the bridge starts and the page loads, but JARVIS never
+// answers. `claude auth status` reads local state only; it costs nothing.
+if (claudeFound) {
+  let state = 'unknown';
+  try {
+    const res = spawnSync('claude', ['auth', 'status'], { encoding: 'utf8', timeout: 10000 });
+    state = loginState(res.stdout);
+  } catch {
+    // leave it unknown
+  }
+  if (state === 'yes') {
+    line(tick, 'Claude Code is logged in.');
+  } else if (state === 'no') {
+    line(warn, 'Claude Code is not logged in. JARVIS will load but never answer.');
+    line(info, 'Run `claude auth login` (or just `claude`) and complete login, then run this check again.');
+  } else {
+    line(info, 'Could not confirm the Claude Code login. If JARVIS never answers, run `claude` and check you are logged in.');
+  }
 }
 
 // --- ~/.claude.json and MCP servers --------------------------------------

@@ -188,11 +188,12 @@ const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5'
  * cross-referencing, no second look. On a model of this tier that is leaving
  * most of it on the table.
  *
- * 'medium' is the compromise worth having here. It reasons and reaches for
- * tools noticeably more than 'low' while still answering inside the window a
- * spoken conversation tolerates. Raise it to 'high' or 'xhigh' when quality
- * matters more than pace; drop back to 'low' when filming and every second of
- * dead air shows.
+ * The default is 'high': fuller answers and more tool use, at the cost of
+ * longer pauses before JARVIS speaks. 'medium' is the compromise when latency
+ * matters — it still reasons and reaches for tools noticeably more than 'low'
+ * while answering inside the window a spoken conversation tolerates. Go to
+ * 'xhigh' when quality matters more than pace; drop to 'low' when filming and
+ * every second of dead air shows.
  */
 const EFFORT = process.env.JARVIS_EFFORT ?? 'high'
 
