@@ -28,6 +28,12 @@ const MAX_SNAPS = 3 // ffmpeg processes at once for thumbnails
 const MAX_LIVE = 2
 
 const snaps = new Map() // ip -> { at, buf?, pending? }
+// Hikvision locks a camera's IP for ~30 min after ~7 bad logins. One rejection ends
+// all traffic for that user:pass, so a wrong password costs a few attempts, not 18
+// cameras x every refresh. Fixing cameras.json changes the key and lifts the block.
+const REJECT_MS = 30 * 60_000
+const rejected = new Map() // `${user}:${pass}` -> when
+const isRejected = (key) => Date.now() - (rejected.get(key) ?? -Infinity) < REJECT_MS
 let running = 0
 let live = 0
 const waiting = []
@@ -45,7 +51,10 @@ function rtspFor(ip, sub) {
   const c = { path: '/Streaming/Channels/101', sub: '/Streaming/Channels/102', ...cfg.default, ...cfg[ip] }
   if (!c.user || !c.pass) return null
   // ponytail: credentials are in ffmpeg's argv, visible to other local processes.
-  return `rtsp://${encodeURIComponent(c.user)}:${encodeURIComponent(c.pass)}@${ip}:554${sub ? c.sub : c.path}`
+  return {
+    url: `rtsp://${encodeURIComponent(c.user)}:${encodeURIComponent(c.pass)}@${ip}:554${sub ? c.sub : c.path}`,
+    key: `${c.user}:${c.pass}`,
+  }
 }
 
 const slot = () =>
@@ -59,18 +68,32 @@ const release = () => {
 const ffmpeg = (args) =>
   spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-rtsp_transport', 'tcp', ...args], {
     windowsHide: true,
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
 
-function snapshot(url, ip) {
+/** ffmpeg says "401 Unauthorized" on a rejected login. Never log the text: it echoes the URL. */
+function watchAuth(p, key) {
+  let err = ''
+  p.stderr.on('data', (d) => {
+    if (err.length < 4000) err += d
+  })
+  p.on('close', () => {
+    if (/401|unauthorized/i.test(err)) rejected.set(key, Date.now())
+  })
+}
+
+function snapshot({ url, key }, ip) {
   const cached = snaps.get(ip)
   if (cached?.pending) return cached.pending
   if (cached?.buf && Date.now() - cached.at < SNAP_TTL_MS) return Promise.resolve(cached.buf)
   const pending = (async () => {
     await slot()
     try {
+      // Queued behind a request that just got rejected: do not knock again.
+      if (isRejected(key)) throw Object.assign(new Error('credenciales rechazadas'), { status: 401 })
       return await new Promise((res, rej) => {
         const p = ffmpeg(['-i', url, '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '6', '-f', 'image2pipe', '-c:v', 'mjpeg', '-'])
+        watchAuth(p, key)
         const chunks = []
         const timer = setTimeout(() => p.kill('SIGKILL'), 9000)
         p.stdout.on('data', (d) => chunks.push(d))
@@ -78,7 +101,9 @@ function snapshot(url, ip) {
         p.on('close', () => {
           clearTimeout(timer)
           const buf = Buffer.concat(chunks)
-          buf.length ? res(buf) : rej(new Error('sin imagen'))
+          if (buf.length) return res(buf)
+          // watchAuth's close handler ran first (registered earlier), so this is current.
+          rej(Object.assign(new Error(isRejected(key) ? 'credenciales rechazadas' : 'sin imagen'), isRejected(key) ? { status: 401 } : {}))
         })
       })
     } finally {
@@ -110,24 +135,26 @@ export function handleCamera(req, res, cors, originAllowed) {
 
   const isCamera = lanSnapshot()?.devices.some((d) => d.ip === ip && d.kind === 'camera')
   if (!isCamera) return fail(404, 'not a known camera')
-  const url = rtspFor(ip, mode === 'snap')
-  if (!url) return fail(401, 'sin credenciales')
+  const target = rtspFor(ip, mode === 'snap')
+  if (!target) return fail(401, 'sin credenciales')
+  if (isRejected(target.key)) return fail(401, 'credenciales rechazadas')
 
   if (mode === 'snap') {
-    snapshot(url, ip).then(
+    snapshot(target, ip).then(
       (buf) => {
         res.writeHead(200, { ...cors, 'content-type': 'image/jpeg', 'cache-control': 'no-store' })
         res.end(buf)
       },
-      (err) => fail(502, err.message),
+      (err) => fail(err.status ?? 502, err.message),
     )
     return true
   }
 
   if (live >= MAX_LIVE) return fail(429, 'demasiadas vistas en vivo')
   live++
-  const p = ffmpeg(['-i', url, '-an', '-vf', 'scale=1280:-2', '-r', '10', '-q:v', '5', '-f', 'mpjpeg', '-boundary_tag', 'frame', '-'])
+  const p = ffmpeg(['-i', target.url, '-an', '-vf', 'scale=1280:-2', '-r', '10', '-q:v', '5', '-f', 'mpjpeg', '-boundary_tag', 'frame', '-'])
   res.writeHead(200, { ...cors, 'content-type': 'multipart/x-mixed-replace;boundary=frame', 'cache-control': 'no-store' })
+  watchAuth(p, target.key)
   p.stdout.pipe(res)
   // Closing the viewer must stop the stream, or ffmpeg keeps pulling video forever.
   const stop = () => {

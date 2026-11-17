@@ -11,37 +11,43 @@ const label = (d: LanDevice) => d.name ?? `Cámara .${d.ip.split('.')[3]}`
  *  ask the bridge at the same instant. */
 function Thumb({ d, index, onPick }: { d: LanDevice; index: number; onPick: () => void }) {
   const [url, setUrl] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
+  const [failed, setFailed] = useState<null | 'retry' | 'auth'>(null)
 
   useEffect(() => {
     let live = true
     let timer: number
-    const load = (n: number) => {
-      const next = src(d.ip, 'snap', n)
-      const img = new Image()
-      img.onload = () => {
+    let shown: string | null = null
+    // fetch rather than <img> so a 401 is visible: a rejected login must stop
+    // the retries for good, because the camera locks its IP after a few of them.
+    const load = async (n: number) => {
+      try {
+        const res = await fetch(src(d.ip, 'snap', n))
         if (!live) return
+        if (res.status === 401) return setFailed('auth')
+        if (!res.ok) throw new Error(String(res.status))
+        const next = URL.createObjectURL(await res.blob())
+        if (shown) URL.revokeObjectURL(shown)
+        shown = next
         setUrl(next)
-        setFailed(false)
+        setFailed(null)
         timer = window.setTimeout(() => load(n + 1), REFRESH_MS)
-      }
-      img.onerror = () => {
+      } catch {
         if (!live) return
-        setFailed(true)
+        setFailed('retry')
         timer = window.setTimeout(() => load(n + 1), REFRESH_MS * 2)
       }
-      img.src = next
     }
     timer = window.setTimeout(() => load(0), index * 400)
     return () => {
       live = false
       clearTimeout(timer)
+      if (shown) URL.revokeObjectURL(shown)
     }
   }, [d.ip, index])
 
   return (
     <button className="cam-tile" onClick={onPick}>
-      {url && !failed ? <img src={url} alt="" /> : <span className="cam-empty">{failed ? 'SIN ACCESO' : '···'}</span>}
+      {url && !failed ? <img src={url} alt="" /> : <span className="cam-empty">{failed === 'auth' ? 'CREDENCIALES' : failed ? 'SIN SEÑAL' : '···'}</span>}
       <span className="cam-name">{label(d)}</span>
     </button>
   )
