@@ -21,6 +21,8 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
+import { lanSnapshot, startLan } from './lan.mjs'
+import { handleCamera } from './cameras.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
@@ -676,6 +678,8 @@ const handleRequest = async (req, res) => {
     return res.end()
   }
 
+  if (handleCamera(req, res, cors, originAllowed)) return
+
   if (req.method === 'GET' && req.url === '/health') {
     // The browser reads this once at boot to decide which voice engine to use.
     // Both premium paths ride the same ElevenLabs key, so both flags track it:
@@ -1039,8 +1043,18 @@ const RESULT_FAILURES = {
   default: 'The turn ended without an answer.',
 }
 
+// Live LAN map: scans only while a HUD is connected, pushes each result to all.
+startLan(
+  () => wss.clients.size > 0,
+  (snap) => {
+    const frame = JSON.stringify(snap)
+    for (const c of wss.clients) if (c.readyState === 1) c.send(frame)
+  },
+)
+
 wss.on('connection', (socket) => {
   console.log('[jarvis] client connected')
+  if (lanSnapshot()) socket.send(JSON.stringify(lanSnapshot()))
 
   // Answer the HUD straight away rather than making it wait for the agent's
   // first turn. Refined later by the real init message.

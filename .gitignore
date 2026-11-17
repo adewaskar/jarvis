@@ -25,3 +25,9 @@ dist-ssr
 
 # Copied out of node_modules by scripts/start.mjs — 34MB of build output.
 public/mediapipe/
+
+# Local MAC -> name labels for the LAN panel.
+bridge/devices.json
+
+# Camera logins for the grid viewer.
+bridge/cameras.json

@@ -1,5 +1,5 @@
 import type { AskHandlers } from './anthropic'
-import type { Blade, Panel } from '../store'
+import type { Blade, LanDevice, Panel } from '../store'
 import { BRIDGE_WS_URL } from '../config'
 
 /**
@@ -26,6 +26,8 @@ type Frame = {
   message?: string
   panel?: Panel
   blade?: Blade
+  devices?: LanDevice[]
+  at?: number
   op?: string
   args?: unknown
   id?: string
@@ -85,6 +87,12 @@ export function watchCapture(fn: (req: CaptureRequest) => Promise<CaptureResult>
 
 /** Blades arrive the same way panels do — pushed mid-turn, so the article is
  *  already open as he starts the sentence about it. */
+/** Live LAN snapshot, pushed by the bridge every few seconds while we are connected. */
+let onLan: ((devices: LanDevice[], at: number) => void) | null = null
+export function watchLan(fn: (devices: LanDevice[], at: number) => void) {
+  onLan = fn
+}
+
 let onBlade: ((blade: Blade) => void) | null = null
 export function watchBlades(fn: (blade: Blade) => void) {
   onBlade = fn
@@ -179,6 +187,8 @@ function dispatch(ws: WebSocket) {
       firstReady.resolve()
     } else if (msg.type === 'panel' && msg.panel) {
       onPanel?.(msg.panel)
+    } else if (msg.type === 'lan' && msg.devices) {
+      onLan?.(msg.devices, msg.at ?? Date.now())
     } else if (msg.type === 'blade' && msg.blade) {
       onBlade?.(msg.blade)
     } else if (msg.type === 'capture' && msg.id) {
