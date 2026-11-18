@@ -377,3 +377,4 @@ MIT.
 The boot sound and any tracks in `public/audio/` ship with the project for the
 demo. If you go on to monetise something built on this, clearing the rights to
 that audio is your responsibility.
+npm run dev -- --host 0.0.0.0
