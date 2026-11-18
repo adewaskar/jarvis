@@ -126,7 +126,35 @@ const VETO_EXEMPT = new Set([
   'openrouter__send-feedback',
 ])
 
-export function decideTool(name, allowWrites = false) {
+/**
+ * Narrow write grants: JARVIS_WRITE_SERVERS, parsed.
+ *
+ * JARVIS_ALLOW_WRITES is one switch for everything — every effectful MCP tool
+ * on every server, plus a shell and file editing. That is a lot to hand over
+ * when all you wanted was "let him add calendar events". A grant lets one
+ * server's effectful tools through, or one tool on it, and nothing else:
+ *
+ *   claude_ai_Google_Calendar                 every tool on that server
+ *   claude_ai_Google_Calendar__create_event   that one tool only
+ *
+ * Grants apply to MCP tools only. Built-ins (Bash, Write, Edit …) still need
+ * JARVIS_ALLOW_WRITES, so a grant can never be how a shell appears. Names are
+ * matched exactly, as they appear in `mcp__<server>__<tool>`; the bridge logs
+ * every denied tool by that name, which is the easiest place to read them off.
+ */
+export function parseWriteGrants(list) {
+  return new Set(
+    (list ?? '')
+      .split(',')
+      .map((s) => s.trim().replace(/^mcp__/, ''))
+      .filter(Boolean),
+  )
+}
+
+const granted = (grants, server, tool) =>
+  grants.has(server) || grants.has(`${server}__${tool}`)
+
+export function decideTool(name, allowWrites = false, writeGrants = new Set()) {
   if (READ_ONLY_BUILTINS.has(name)) return true
   if (WRITE_BUILTINS.has(name)) return allowWrites
 
@@ -154,12 +182,13 @@ export function decideTool(name, allowWrites = false) {
     if (server === 'jarvis_eyes') return true
 
     const tool = mcpToolOf(name)
+    const writeOk = allowWrites || granted(writeGrants, server, tool)
     if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
-      return allowWrites
+      return writeOk
     }
     // The session tools this bridge is developed inside count as read-only too.
     if (READ_ONLY_MCP.has(server) || server.startsWith('ccd_session')) return true
-    return READ_VERB.test(tool) ? true : allowWrites
+    return READ_VERB.test(tool) ? true : writeOk
   }
   return allowWrites
 }
@@ -291,8 +320,8 @@ export function pathProblem(target, { cwd, roots }) {
  * spoken, so it is a plain sentence with no paths or commands to read out
  * beyond the one the model already chose.
  */
-export function checkToolUse(name, input, { allowWrites = false, cwd, roots }) {
-  if (!decideTool(name, allowWrites)) {
+export function checkToolUse(name, input, { allowWrites = false, writeGrants, cwd, roots }) {
+  if (!decideTool(name, allowWrites, writeGrants)) {
     return {
       allow: false,
       reason:

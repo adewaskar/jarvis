@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { builtinTools, checkToolUse, decideTool, fetchTargetProblem, fileRoots } from '../bridge/policy.mjs'
+import { builtinTools, checkToolUse, decideTool, fetchTargetProblem, fileRoots, parseWriteGrants } from '../bridge/policy.mjs'
 
 const workspace = mkdtempSync(join(tmpdir(), 'jarvis-ws-'))
 const roots = fileRoots({ workspace })
@@ -20,6 +20,40 @@ test('decideTool keeps its existing verdicts', () => {
   assert.equal(decideTool('mcp__higgsfield__generate_image'), true)
   assert.equal(decideTool('mcp__elevenlabs__make_outbound_call'), false)
   assert.equal(decideTool('SomeFutureBuiltin'), false)
+})
+
+test('write grants open one server, or one tool, and nothing else', () => {
+  const grants = parseWriteGrants(' calendar , mcp__mail__create_draft,,')
+  assert.deepEqual([...grants].sort(), ['calendar', 'mail__create_draft'])
+
+  // A granted server: its effectful tools, verb-less ones included.
+  assert.equal(decideTool('mcp__calendar__create_event', false, grants), true)
+  assert.equal(decideTool('mcp__calendar__delete_event', false, grants), true)
+  assert.equal(decideTool('mcp__calendar__respond_to_invite', false, grants), true)
+
+  // A granted tool: that one, not its neighbours.
+  assert.equal(decideTool('mcp__mail__create_draft', false, grants), true)
+  assert.equal(decideTool('mcp__mail__send_email', false, grants), false)
+  assert.equal(decideTool('mcp__mail__search_threads', false, grants), true)
+
+  // Everyone else is untouched, and names match exactly.
+  assert.equal(decideTool('mcp__other__create_event', false, grants), false)
+  assert.equal(decideTool('mcp__calendar_extra__create_event', false, grants), false)
+  assert.equal(decideTool('mcp__Calendar__create_event', false, grants), false)
+
+  // A grant is never a shell or file write.
+  assert.equal(decideTool('Bash', false, new Set(['Bash'])), false)
+  assert.equal(decideTool('Write', false, grants), false)
+  assert.equal(allowed('Bash', { command: 'ls' }, false), false)
+
+  // And it reaches the hook, not just decideTool.
+  const hookCtx = { ...ctx(false), writeGrants: grants }
+  assert.equal(checkToolUse('mcp__calendar__create_event', {}, hookCtx).allow, true)
+  assert.equal(checkToolUse('mcp__mail__send_email', {}, hookCtx).allow, false)
+
+  // No grants behaves exactly as before.
+  assert.equal(decideTool('mcp__calendar__create_event'), false)
+  assert.equal(decideTool('mcp__calendar__create_event', false, parseWriteGrants(undefined)), false)
 })
 
 test('read-only mode refuses a shell command the CLI would auto-approve', () => {
