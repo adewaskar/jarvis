@@ -28,6 +28,3 @@ public/mediapipe/
 
 # Local MAC -> name labels for the LAN panel.
 bridge/devices.json
-
-# Camera logins for the grid viewer.
-bridge/cameras.json

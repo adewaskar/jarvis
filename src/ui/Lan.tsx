@@ -20,11 +20,10 @@ function Row({ d, isNew }: { d: LanDevice; isNew: boolean }) {
 /**
  * Live view of what is on the local network. Cameras and speakers are counted as
  * groups (18 identical rows would bury the rest); everything else is listed.
- * Cameras are only counted here — opening a stream is a separate, later feature.
+ * Cameras are only counted here, never opened.
  */
 export function Lan() {
   const lan = useStore((s) => s.lan)
-  const openCameras = useStore((s) => s.setCamerasOpen)
   if (!lan) return null
 
   const { devices, joined, at } = lan
@@ -37,10 +36,10 @@ export function Lan() {
   return (
     <aside className="lan" aria-label="Dispositivos en la red">
       <div className="rail-title">RED · {alive.length} ACTIVOS</div>
-      <button className="lan-group lan-btn" onClick={() => openCameras(true)} disabled={!cams.length}>
-        <span>CÁMARAS ›</span>
+      <div className="lan-group">
+        <span>CÁMARAS</span>
         <b>{cams.length}</b>
-      </button>
+      </div>
       <div className="lan-group">
         <span>SONOS</span>
         <b>{sonos.length}</b>

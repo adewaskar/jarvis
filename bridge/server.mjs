@@ -22,7 +22,6 @@ import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { lanSnapshot, startLan } from './lan.mjs'
-import { handleCamera } from './cameras.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
@@ -677,8 +676,6 @@ const handleRequest = async (req, res) => {
     res.writeHead(204, cors)
     return res.end()
   }
-
-  if (handleCamera(req, res, cors, originAllowed)) return
 
   if (req.method === 'GET' && req.url === '/health') {
     // The browser reads this once at boot to decide which voice engine to use.

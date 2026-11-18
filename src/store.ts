@@ -246,9 +246,6 @@ type State = {
   /** Latest LAN snapshot, and when each MAC first appeared after the first one. */
   lan: { at: number; devices: LanDevice[]; joined: Record<string, number> } | null
   setLan: (devices: LanDevice[], at: number) => void
-  /** The camera grid overlay. */
-  camerasOpen: boolean
-  setCamerasOpen: (open: boolean) => void
   /** Cards currently on the display, newest last. */
   panels: Panel[]
   /** Blades currently open, newest last — which is also front-most. */
@@ -301,8 +298,6 @@ export const useStore = create<State>((set) => ({
   gestures: false,
   looking: null,
   lan: null,
-  camerasOpen: false,
-  setCamerasOpen: (camerasOpen) => set({ camerasOpen }),
   setLan: (devices, at) =>
     set((s) => {
       // The first snapshot is the baseline: everything in it was already here.

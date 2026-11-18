@@ -7,7 +7,6 @@ import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
 import { Lan } from './Lan'
-import { Cameras } from './Cameras'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -228,7 +227,6 @@ export function Hud() {
       )}
 
       {ui.chrome.systems && <Lan />}
-      <Cameras />
 
       {/* Right rail: live telemetry, mostly for flavour */}
       <aside className="rail rail-right">
