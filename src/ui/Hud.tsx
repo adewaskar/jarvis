@@ -6,6 +6,7 @@ import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
+import { Lan } from './Lan'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -224,6 +225,8 @@ export function Hud() {
           </div>
         </aside>
       )}
+
+      {ui.chrome.systems && <Lan />}
 
       {/* Right rail: live telemetry, mostly for flavour */}
       <aside className="rail rail-right">

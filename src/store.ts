@@ -16,6 +16,19 @@ export type Phase =
  * JARVIS authors the markup and picks the treatment — this is a delivery
  * envelope, not a template. The `html` is sanitised before it reaches the DOM.
  */
+/** One device on the LAN, as reported by bridge/lan.mjs. */
+export type LanDevice = {
+  ip: string
+  mac: string
+  name: string | null
+  kind: 'camera' | 'sonos' | 'self' | 'other'
+  /** Answered ping this scan. false = in the ARP table only (sleeping or just left). */
+  alive: boolean
+  /** Privacy-randomised MAC — a phone or laptop, never identifiable by vendor. */
+  rand: boolean
+  since: number
+}
+
 export type Panel = {
   id: string
   title: string
@@ -230,6 +243,9 @@ type State = {
   looking: string | null
   /** Transient status line during boot, e.g. the voice model download. */
   bootNote: string
+  /** Latest LAN snapshot, and when each MAC first appeared after the first one. */
+  lan: { at: number; devices: LanDevice[]; joined: Record<string, number> } | null
+  setLan: (devices: LanDevice[], at: number) => void
   /** Cards currently on the display, newest last. */
   panels: Panel[]
   /** Blades currently open, newest last — which is also front-most. */
@@ -281,6 +297,17 @@ export const useStore = create<State>((set) => ({
   voice: '',
   gestures: false,
   looking: null,
+  lan: null,
+  setLan: (devices, at) =>
+    set((s) => {
+      // The first snapshot is the baseline: everything in it was already here.
+      const joined = { ...(s.lan?.joined ?? {}) }
+      if (s.lan) {
+        const had = new Set(s.lan.devices.map((d) => d.mac))
+        for (const d of devices) if (!had.has(d.mac) && d.alive) joined[d.mac] = at
+      }
+      return { lan: { at, devices, joined } }
+    }),
   panels: [],
   blades: [],
   focusedBlade: null,

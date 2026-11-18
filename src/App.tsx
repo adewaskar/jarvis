@@ -22,6 +22,7 @@ import {
   watchServers,
   watchPanels,
   watchBlades,
+  watchLan,
   watchCapture,
   watchUi,
   watchConnection,
@@ -364,6 +365,7 @@ export default function App() {
     watchServers((servers) => store.getState().setConnected(servers))
     watchPanels((panel) => store.getState().pushPanel(panel))
     watchBlades((blade) => store.getState().pushBlade(blade))
+    watchLan((devices, at) => store.getState().setLan(devices, at))
 
     /**
      * JARVIS asking to see something.

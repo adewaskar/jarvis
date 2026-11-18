@@ -1898,3 +1898,60 @@ kbd {
   transform: scaleX(-1);
   background: #000;
 }
+
+/* LAN panel — live devices on the network (src/ui/Lan.tsx). */
+.lan {
+  position: absolute;
+  top: 96px;
+  right: 92px;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 10px;
+  text-align: left;
+}
+.lan-group {
+  display: flex;
+  justify-content: space-between;
+  letter-spacing: 0.18em;
+  opacity: 0.82;
+}
+.lan-group b {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 400;
+  color: var(--accent);
+}
+.lan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 34vh;
+  overflow-y: auto;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  scrollbar-width: none;
+}
+.lan-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  opacity: 0.8;
+}
+.lan-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lan-ip {
+  font-family: 'JetBrains Mono', monospace;
+  opacity: 0.5;
+}
+.lan-standby { opacity: 0.3; }
+.lan-new { opacity: 1; color: var(--accent); }
+.lan-tag { font-size: 8px; letter-spacing: 0.2em; }
+.lan-foot { opacity: 0.35; font-size: 9px; letter-spacing: 0.18em; }
+@media (max-width: 900px) {
+  .lan { right: 30px; }
+}

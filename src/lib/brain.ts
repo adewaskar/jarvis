@@ -2,7 +2,7 @@ import { BACKEND } from '../config'
 import * as direct from './anthropic'
 import * as bridge from './bridge'
 import type { AskHandlers, Msg } from './anthropic'
-import type { Blade, Panel } from '../store'
+import type { Blade, LanDevice, Panel } from '../store'
 
 export type { AskHandlers, Msg }
 export type { ConnectionState } from './bridge'
@@ -82,6 +82,14 @@ export function watchCapture(
   fn: (req: bridge.CaptureRequest) => Promise<bridge.CaptureResult>,
 ): void {
   if (usingBridge) bridge.watchCapture(fn)
+}
+
+/** Live map of the devices on the local network. Bridge-only: the browser cannot
+ *  read the ARP table, so the bridge scans and pushes. */
+export function watchLan(
+  fn: (devices: LanDevice[], at: number) => void,
+): void {
+  if (usingBridge) bridge.watchLan(fn)
 }
 
 /**
