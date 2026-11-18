@@ -234,6 +234,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
 | `JARVIS_EFFORT` | `medium` | Reasoning effort |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
+| `JARVIS_WRITE_SERVERS` | none | Comma-separated MCP servers, or `server__tool` names, allowed to take actions without turning on all writes (see below) |
 | `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
 | `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
 | `JARVIS_DISABLE` | none | Comma-separated capabilities to leave out: `browser`, `camera`, `interface` |
@@ -302,6 +303,30 @@ inside the same folders; the shell can reach anything your user account can.
 
 > Read `decideTool()` before you do. *"Hey Jarvis, clean up my downloads folder"*
 > means something rather different with writes enabled.
+
+### Allowing actions for some tools only
+
+Writes are one switch for everything: every effectful tool on every server,
+plus a shell. To let JARVIS act through just one or two servers, name them in
+`JARVIS_WRITE_SERVERS` and leave `JARVIS_ALLOW_WRITES` off:
+
+```bash
+# Every Calendar action, but no other app's.
+JARVIS_WRITE_SERVERS=claude_ai_Google_Calendar npm start
+
+# Calendar may add events, but not change or delete them.
+JARVIS_WRITE_SERVERS=claude_ai_Google_Calendar__create_event npm start
+```
+
+An entry is either a server name, which allows all of that server's tools, or
+`server__tool`, which allows that one tool. Names match exactly, as they appear
+in `mcp__<server>__<tool>`; the bridge logs every denied call by its full name
+(`[jarvis] tool mcp__claude_ai_Gmail__send_email -> deny (policy)`), which is
+the easiest place to read them off. The startup banner lists what was granted.
+
+Grants cover MCP tools only. `Bash`, `Write`, `Edit` and the browser's clicking
+and typing still need `JARVIS_ALLOW_WRITES`, so a grant never gives the agent a
+shell.
 
 ---
 

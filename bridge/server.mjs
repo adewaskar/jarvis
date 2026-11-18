@@ -31,6 +31,7 @@ import {
   builtinTools,
   checkToolUse,
   decideTool as decidePolicy,
+  parseWriteGrants,
   fetchTargetProblem,
   fileRoots,
 } from './policy.mjs'
@@ -159,6 +160,14 @@ const ALLOW_WRITES =
   process.env.JARVIS_ALLOW_WRITES === '1' || process.argv.includes('--writes')
 
 /**
+ * Write access for named MCP servers, or single tools on them, without
+ * JARVIS_ALLOW_WRITES and the shell that comes with it. Comma separated:
+ * `claude_ai_Google_Calendar` or `claude_ai_Google_Calendar__create_event`. See
+ * parseWriteGrants in policy.mjs.
+ */
+const WRITE_GRANTS = parseWriteGrants(process.env.JARVIS_WRITE_SERVERS)
+
+/**
  * Built-in capabilities to leave out entirely: `browser` (the user's own
  * Chrome), `camera`, `interface` (the ui_* tools). A capability left out is
  * not merely denied — its tools never reach the model, which also saves their
@@ -270,7 +279,7 @@ const ACCOUNT_CONNECTORS = process.env.JARVIS_ACCOUNT_CONNECTORS === '1'
  * The tool policy lives in policy.mjs so it can be tested on its own. Bound to
  * this process's write setting once, so everything below reads as before.
  */
-const decideTool = (name) => decidePolicy(name, ALLOW_WRITES)
+const decideTool = (name) => decidePolicy(name, ALLOW_WRITES, WRITE_GRANTS)
 
 /**
  * The agent's working directory, and the only folder its file tools may use
@@ -303,6 +312,7 @@ const TOOL_ROOTS = fileRoots({
 const enforcePolicy = async (input) => {
   const verdict = checkToolUse(input.tool_name, input.tool_input, {
     allowWrites: ALLOW_WRITES,
+    writeGrants: WRITE_GRANTS,
     cwd: WORKSPACE,
     roots: TOOL_ROOTS,
   })
@@ -1095,6 +1105,9 @@ console.log(
   `[jarvis] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
     (ALLOW_WRITES ? '' : ' — set JARVIS_ALLOW_WRITES=1 to permit shell/file/device actions'),
 )
+if (!ALLOW_WRITES && WRITE_GRANTS.size) {
+  console.log(`[jarvis] writes granted for: ${[...WRITE_GRANTS].join(', ')}`)
+}
 // Asynchronous, so it lands a beat after the rest of the banner. Worth printing
 // at all because an extension that is simply not running is indistinguishable
 // at the tool boundary from one that is broken, and this is the one place the
