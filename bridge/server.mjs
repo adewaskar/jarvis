@@ -21,6 +21,7 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
+import { withClock } from './clock.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
@@ -384,6 +385,13 @@ weight, since your tone will not.
 Plain spoken prose only. No markdown, no bullet points, no headings, no emoji,
 no asterisks, no lists. Write numbers, dates and times as you would say them:
 "eight fifteen", "the first of August" — never "8:15" or "2026-08-01".
+
+THE CLOCK. Each message from the user begins with a line like
+"[Local time: Wednesday, November 18, 2026 at 1:42 PM EST (America/New_York)]".
+The bridge adds it; the user did not say it. It is the current date and time
+where they are: use it for "what time is it", "today", "tomorrow", "this
+evening" and anything else that depends on the date. Never read it out or
+mention it unless they ask the time or date.
 
 `
 const PROMPT_BLADES = `The blades — the ONLY surface:
@@ -1150,7 +1158,9 @@ wss.on('connection', (socket) => {
       if (closed || text == null) return
       yield {
         type: 'user',
-        message: { role: 'user', content: text },
+        // Stamped as it reaches the model, so a queued message gets the time
+        // it is actually answered rather than the time it was typed.
+        message: { role: 'user', content: withClock(text) },
         parent_tool_use_id: null,
       }
     }
