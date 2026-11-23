@@ -136,9 +136,9 @@ export const env = {
   porcupineKey: str(import.meta.env.VITE_PICOVOICE_ACCESS_KEY) ?? '',
 }
 
-/** `claude-opus-5` is the strongest model; `claude-sonnet-5` trades a little
+/** `claude-opus-5-5` is the strongest model a subscription includes; `claude-fable-5-2` is stronger but bills usage credits. Trades a little
  *  quality for lower latency if you find responses feel slow on camera. */
-export const MODEL = 'claude-opus-5'
+export const MODEL = 'claude-opus-5-5'
 
 /**
  * Fast mode runs the same Opus 5 at up to 2.5x output speed. It is a research

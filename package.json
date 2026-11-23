@@ -18,10 +18,11 @@
     "bridge": "node bridge/server.mjs",
     "bridge:writes": "node bridge/server.mjs --writes",
     "setup": "node scripts/setup.mjs",
-    "youtube:connect": "node scripts/youtube-connect.mjs"
+    "youtube:connect": "node scripts/youtube-connect.mjs",
+    "social:connect": "node scripts/social-connect.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.331",
     "@anthropic-ai/sdk": "^0.115.0",
     "@mediapipe/tasks-vision": "^1.0.1",
     "@picovoice/porcupine-web": "^4.0.1",
@@ -32,6 +33,7 @@
     "dompurify": "^3.4.12",
     "framer-motion": "^12.43.0",
     "kokoro-js": "^1.2.1",
+    "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.185.1",

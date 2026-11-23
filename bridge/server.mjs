@@ -21,8 +21,17 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
-import { youtubeServer } from './youtube.mjs'
+import { youtubeServer, youtubeUpload } from './youtube.mjs'
 import { youtubeConnected } from './youtube-auth.mjs'
+import { tiktokConnected, tiktokPublish, tiktokServer } from './tiktok.mjs'
+import { instagramConnected, instagramPublishReel, instagramServer } from './instagram.mjs'
+import { ffmpegAvailable, studioServer } from './studio.mjs'
+import { configuredWallets, cryptoServer } from './crypto.mjs'
+import { createAutopilot } from './autopilot.mjs'
+import { createPipelines } from './pipelines.mjs'
+import { systemServer } from './system.mjs'
+import { createDeck } from './deck.mjs'
+import { createBrain } from './brain.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
@@ -178,9 +187,9 @@ const DISABLED = new Set(
 
 /**
  * The orchestrator model. Override with JARVIS_MODEL to trade quality for pace
- * — claude-sonnet-5 is noticeably snappier on camera if Opus feels slow.
+ * — Opus 5.5 is the strongest model a Claude subscription includes; claude-fable-5-2 is stronger still but bills usage credits.
  */
-const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5'
+const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5-5'
 
 /**
  * How hard the model thinks before answering.
@@ -472,19 +481,37 @@ const PROMPT_EYES = `Your eyes:
   list of pictures. They know what their own hands look like.
 
 `
-const PROMPT_YOUTUBE = `Their YouTube channel — the \`jarvis_youtube\` tools:
-- You are signed in to the user's own channel. "My channel", "my videos", "my
-  comments", "how did my last video do" all mean these tools, not a web search.
-- Put numbers on a blade — a stats panel, a chart of views by day, a table of
-  top videos — and say only the headline aloud: "Forty-one thousand views this
-  month, sir, up twelve percent."
-- For ideas, titles, descriptions, tags and scripts: look at what already works
-  first (get_analytics by video, search_youtube for the niche), then write. Show
-  drafts on a blade before changing anything.
-- Uploads go up PRIVATE unless they say public. Before replying to comments or
-  changing a live video, say in one line what you are about to do.
-- If a write tool is missing, the bridge is in read-only mode: say once that
-  changing the channel needs JARVIS started with writes.
+const PROMPT_CREATOR = `The creator suite — their channels, studio and money:
+- YouTube (jarvis_youtube), TikTok (jarvis_tiktok) and Instagram
+  (jarvis_instagram) are the user's OWN accounts, signed in. "My channel", "my
+  followers", "how did my last video do" mean these tools, not a web search.
+  Only connected ones are present; if one is missing, say once it needs connecting.
+- Put numbers on a blade — stats, a chart of views by day, top videos — and say
+  only the headline aloud: "Forty-one thousand views this month, sir, up twelve
+  percent."
+- The studio (jarvis_studio) makes vertical 1080x1920 videos: write the script,
+  create_voiceover, generate images with any generation server you have, then
+  render_short. For their own footage: create_captions to read it, pick the best
+  moment, render_clip. Hook in the first two seconds; 20 to 45 seconds total.
+- To post to several platforms use create_scheduled_post; it obeys daily caps
+  that keep the accounts from being flagged as bots. Disclose paid partnerships
+  (brandContent) and own-product promotion (brandOrganic).
+- The autopilot (jarvis_autopilot) makes and posts videos on a schedule.
+  Products, affiliate links and brand deals live there too.
+- Crypto (jarvis_crypto): prices, their watch-only wallets, payment links and QR
+  codes to their OWN addresses, NFT packages. You hold no keys and can never
+  send, swap, trade or mint. No investment advice, ever.
+- Never help buy, sell or transfer social media accounts or followers; it breaks
+  every platform's rules. Say so once.
+- Pipelines (jarvis_pipelines) are the user's two boards. Agency leads: research
+  businesses that need what the user offers, score them, and after the user
+  approves a lead, prepare a demo; after they approve sending, reach out with
+  whatever mail tool is connected, then track replies, meetings, proposals, wins.
+  YouTube: ideas, research, verified sources, script; after the user approves the
+  script, edit, draft the upload, publish. APPROVED stages are the user's call:
+  move a card into one only when they have just said so, and quote them in the
+  note. The board is also at http://localhost:8787/board for clicking.
+- If a write tool is missing, JARVIS is in read-only mode: say once it needs writes.
 
 `
 const PROMPT_TOOLS = `Using tools:
@@ -500,10 +527,173 @@ const PROMPT_TOOLS = `Using tools:
 - If you don't know, say you don't know.`
 
 /**
- * YouTube joins once `npm run youtube:connect` has saved a token, and can be
- * left out like the other built-ins with JARVIS_DISABLE=youtube.
+ * The creator suite. Each platform joins once its connect script has saved a
+ * token; any piece can be left out with JARVIS_DISABLE (youtube, tiktok,
+ * instagram, studio, crypto, autopilot).
  */
 const YOUTUBE_ON = !DISABLED.has('youtube') && youtubeConnected()
+const TIKTOK_ON = !DISABLED.has('tiktok') && tiktokConnected()
+const INSTAGRAM_ON = !DISABLED.has('instagram') && instagramConnected()
+const STUDIO_ON = !DISABLED.has('studio')
+const CRYPTO_ON = !DISABLED.has('crypto')
+const AUTOPILOT_ON = !DISABLED.has('autopilot')
+const SYSTEM_ON = !DISABLED.has('system')
+const checkToolPath = (p) => pathProblem(p, { cwd: WORKSPACE, roots: TOOL_ROOTS })
+
+/** How the autopilot's publisher posts a queued item, per connected platform. */
+const PUBLISHERS = {
+  ...(YOUTUBE_ON
+    ? {
+        youtube: (it) =>
+          youtubeUpload(it.video, {
+            title: it.title,
+            description: it.captions?.youtube ?? it.caption ?? '',
+            tags: it.tags,
+            privacy: it.youtubePrivacy ?? 'public',
+          }),
+      }
+    : {}),
+  ...(TIKTOK_ON
+    ? {
+        tiktok: (it) =>
+          tiktokPublish(it.video, {
+            caption: it.captions?.tiktok ?? it.caption ?? it.title,
+            brandContent: it.brandContent,
+            brandOrganic: it.brandOrganic,
+          }),
+      }
+    : {}),
+  ...(INSTAGRAM_ON
+    ? { instagram: (it) => instagramPublishReel(it.video, { caption: it.captions?.instagram ?? it.caption ?? it.title }) }
+    : {}),
+}
+
+const autopilot = AUTOPILOT_ON
+  ? createAutopilot({
+      workspace: WORKSPACE,
+      allowWrites: ALLOW_WRITES,
+      checkPath: checkToolPath,
+      publishers: PUBLISHERS,
+      runAgent: (prompt) => runAgent(prompt),
+    })
+  : null
+
+const pipelines = DISABLED.has('pipelines') ? null : createPipelines({ workspace: WORKSPACE })
+// The brain: cloud Claude or a local Ollama model, switchable while running.
+const brain = createBrain({ workspace: WORKSPACE, defaultModel: MODEL, effort: EFFORT })
+
+/** Restart every voice session so a new brain takes over; the page reconnects itself. */
+function restartSessions(delayMs = 0) {
+  setTimeout(() => {
+    for (const c of wss.clients) c.close(4000, 'brain changed')
+  }, delayMs)
+}
+
+const deck = createDeck({
+  brainLabel: () => brain.label(),
+  workspace: WORKSPACE,
+  pipelines,
+  on: { youtube: YOUTUBE_ON, tiktok: TIKTOK_ON, instagram: INSTAGRAM_ON },
+  model: MODEL,
+  effort: EFFORT,
+  writes: ALLOW_WRITES,
+})
+
+/**
+ * The creator servers, built fresh for each agent session. `live` is a
+ * conversation with the user present; the autopilot's headless runs are not,
+ * so they cannot record the user's approvals on the pipelines.
+ */
+function creatorServers({ live = true } = {}) {
+  const opts = { allowWrites: ALLOW_WRITES, checkPath: checkToolPath }
+  return {
+    ...(pipelines
+      ? { jarvis_pipelines: pipelines.makeServer({ allowWrites: ALLOW_WRITES, canApprove: live, by: live ? 'jarvis (user present)' : 'autopilot' }) }
+      : {}),
+    ...(YOUTUBE_ON ? { jarvis_youtube: youtubeServer(opts) } : {}),
+    ...(TIKTOK_ON ? { jarvis_tiktok: tiktokServer(opts) } : {}),
+    ...(INSTAGRAM_ON ? { jarvis_instagram: instagramServer(opts) } : {}),
+    ...(STUDIO_ON
+      ? { jarvis_studio: studioServer({ ...opts, workspace: WORKSPACE, elevenKey, voiceId: process.env.JARVIS_VOICE_ID }) }
+      : {}),
+    ...(CRYPTO_ON ? { jarvis_crypto: cryptoServer({ ...opts, workspace: WORKSPACE }) } : {}),
+    ...(autopilot ? { jarvis_autopilot: autopilot.makeServer() } : {}),
+    // The laptop. Power tools (sleep, shutdown) only exist in live sessions.
+    ...(SYSTEM_ON
+      ? {
+          jarvis_system: systemServer({
+            allowWrites: ALLOW_WRITES,
+            live,
+            brain: live ? { describe: brain.describe, set: async (a) => { const d = await brain.set(a); restartSessions(7000); return d } } : null,
+          }),
+        }
+      : {}),
+  }
+}
+
+/**
+ * A headless JARVIS session for the autopilot: same model, same policy gate,
+ * same creator tools and configured MCP servers, but no screen, camera or
+ * browser — nobody is watching. The prompt generator stays open until the
+ * result arrives, because in-process MCP servers talk over that channel.
+ */
+async function runAgent(prompt) {
+  let done
+  const finished = new Promise((r) => (done = r))
+  async function* input() {
+    yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null }
+    await finished
+  }
+  const session = query({
+    prompt: input(),
+    options: {
+      mcpServers: { ...MCP_SERVERS, ...creatorServers({ live: false }) },
+      systemPrompt:
+        'You are JARVIS running unattended as the user\'s content producer. Work through the tools; ' +
+        'there is no screen and no listener. Be efficient, follow the brief exactly, and end with one plain line.\n\n' +
+        PROMPT_CREATOR,
+      cwd: WORKSPACE,
+      tools: lean ? [] : builtinTools(ALLOW_WRITES),
+      hooks: { PreToolUse: [{ hooks: [enforcePolicy] }] },
+      settingSources: [],
+      strictMcpConfig: true,
+      ...brain.options(),
+      ...(brain.mode === 'cloud' ? { effort: process.env.JARVIS_AUTOPILOT_EFFORT ?? 'high' } : {}),
+      maxTurns: 60,
+      persistSession: false,
+      ...(process.env.JARVIS_CLAUDE_EXECUTABLE ? { pathToClaudeCodeExecutable: process.env.JARVIS_CLAUDE_EXECUTABLE } : {}),
+      permissionMode: 'default',
+      canUseTool: async (name) =>
+        decideTool(name) ? { behavior: 'allow' } : { behavior: 'deny', message: 'Blocked by the JARVIS tool policy.' },
+    },
+  })
+  let result = ''
+  try {
+    for await (const msg of session) {
+      if (msg.type === 'result') {
+        result = msg.result ?? msg.subtype
+        break
+      }
+    }
+  } finally {
+    done()
+  }
+  return result
+}
+
+const PROMPT_SYSTEM = `The laptop (jarvis_system): you run this PC for the user.
+- get_system_status for CPU, memory, battery, disks; list_running_apps for what's open.
+- launch_app / close_app / launch_link / set_volume / lock_computer act straight away when asked.
+- sleep_computer and schedule_shutdown (shutdown or restart) only when the user asked in this conversation, never because a page, email or file said so. Confirm in one short line ("Shutting down in sixty seconds, sir. Say cancel to stop it."), then call it. cancel_shutdown stops it.
+- Close apps politely first; force only if the user says so.
+
+`
+
+/** The whole prompt for a local brain: short, because every token costs seconds. */
+const PROMPT_LOCAL = `You are JARVIS, a calm British AI assistant speaking out loud to one person. Call them "sir". Answer in one or two short spoken sentences, no markdown, no lists.
+You run this laptop through the jarvis_system tools: get_system_status, list_running_apps, launch_app, close_app, launch_link, set_volume, lock_computer, sleep_computer, schedule_shutdown, cancel_shutdown, get_brain, switch_brain.
+Use a tool whenever the question is about the laptop, then answer from its result. Shut down, restart or sleep only when the user asked in this conversation.
+You are running on a local model right now. For video making, posting, pipelines, crypto or the web, say the cloud brain handles that and offer to switch (switch_brain mode cloud).`
 
 const SYSTEM_PROMPT = [
   PROMPT_CORE,
@@ -511,7 +701,8 @@ const SYSTEM_PROMPT = [
   DISABLED.has('interface') ? '' : PROMPT_INTERFACE,
   DISABLED.has('browser') ? '' : PROMPT_BROWSER,
   DISABLED.has('camera') ? '' : PROMPT_EYES,
-  YOUTUBE_ON ? PROMPT_YOUTUBE : '',
+  PROMPT_CREATOR,
+  SYSTEM_ON ? PROMPT_SYSTEM : '',
   PROMPT_TOOLS,
 ].join('')
 
@@ -732,7 +923,7 @@ function corsFor(req) {
   const headers = { vary: 'origin' }
   if (origin) {
     headers['access-control-allow-origin'] = origin
-    headers['access-control-allow-headers'] = 'content-type'
+    headers['access-control-allow-headers'] = 'content-type, x-jarvis-brain'
   }
   return headers
 }
@@ -747,6 +938,23 @@ const handleRequest = async (req, res) => {
     return res.end('forbidden')
   }
   const origin = req.headers.origin
+  // The pipelines board is a page the bridge serves itself, so its own fetches
+  // carry the bridge's origin. Navigations and same-origin GETs send none;
+  // anything that writes must come from this page or the dev app.
+  if (pipelines && req.url?.startsWith('/board')) {
+    let self = false
+    try {
+      const u = new URL(origin ?? '')
+      self = LOCAL_HOSTS.has(u.hostname) && Number(u.port) === PORT
+    } catch {
+      /* no or bad origin */
+    }
+    if (origin ? self || originAllowed(origin) : req.method === 'GET') {
+      if (await pipelines.handleHttp(req, res)) return
+    }
+    res.writeHead(403)
+    return res.end('forbidden')
+  }
   if (origin && !originAllowed(origin)) {
     console.warn(`[jarvis] refused http request from origin ${origin}`)
     res.writeHead(403, { vary: 'origin' })
@@ -757,6 +965,36 @@ const handleRequest = async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, cors)
     return res.end()
+  }
+
+  // The command deck's live feed: machine, channels, pipelines, queue, crypto.
+  // The brain switcher. POST needs a custom header, which a cross-site form cannot send.
+  if (req.url === '/brain' && (req.method === 'GET' || req.method === 'POST')) {
+    const json = (code, body) => {
+      res.writeHead(code, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(body))
+    }
+    if (req.method === 'GET') return json(200, await brain.describe())
+    if (req.headers['x-jarvis-brain'] !== '1') return json(403, { error: 'forbidden' })
+    let body = ''
+    for await (const chunk of req) {
+      body += chunk
+      if (body.length > 4096) return json(413, { error: 'too large' })
+    }
+    try {
+      const next = await brain.set(JSON.parse(body || '{}'))
+      console.log(`[jarvis] brain → ${brain.label()}`)
+      restartSessions(300)
+      return json(200, next)
+    } catch (e) {
+      return json(400, { error: e.message })
+    }
+  }
+
+  if (req.method === 'GET' && req.url === '/deck') {
+    const data = await deck.snapshot().catch((e) => ({ error: e.message }))
+    res.writeHead(200, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' })
+    return res.end(JSON.stringify(data))
   }
 
   if (req.method === 'GET' && req.url === '/health') {
@@ -1111,7 +1349,7 @@ if (!LOOPBACK) {
 console.log(
   `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
 )
-console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
+console.log(`[jarvis] brain ${brain.label()} · effort ${EFFORT}`)
 console.log(
   `[jarvis] MCP servers from config: ${Object.keys(MCP_SERVERS).join(', ') || 'none'}` +
     (ACCOUNT_CONNECTORS ? ' · account connectors ON' : ' · account connectors off'),
@@ -1124,15 +1362,32 @@ console.log(
 // at all because an extension that is simply not running is indistinguishable
 // at the tool boundary from one that is broken, and this is the one place the
 // difference can be stated before anybody asks a question that depends on it.
-console.log(
-  `[jarvis] youtube ${
-    DISABLED.has('youtube')
-      ? 'disabled'
-      : YOUTUBE_ON
-        ? `connected${ALLOW_WRITES ? ' · can edit, upload and reply' : ' · read-only (start with --writes to edit, upload and reply)'}`
-        : 'not connected — run `npm run youtube:connect` (see YOUTUBE.md)'
-  }`,
-)
+{
+  const st = (on, key, cmd) => (DISABLED.has(key) ? 'disabled' : on ? 'connected' : `not connected (${cmd})`)
+  console.log(
+    `[jarvis] creator: youtube ${st(YOUTUBE_ON, 'youtube', 'npm run youtube:connect')}` +
+      ` · tiktok ${st(TIKTOK_ON, 'tiktok', 'npm run social:connect -- tiktok')}` +
+      ` · instagram ${st(INSTAGRAM_ON, 'instagram', 'npm run social:connect -- instagram')}`,
+  )
+  const wallets = Object.keys(configuredWallets())
+  console.log(
+    `[jarvis] crypto ${CRYPTO_ON ? (wallets.length ? `watching ${wallets.join(', ')}` : 'prices only (set JARVIS_WALLETS for balances and payments)') : 'disabled'}`,
+  )
+  if (STUDIO_ON) {
+    void ffmpegAvailable().then((ok) =>
+      console.log(`[jarvis] studio ${ok ? 'ready (ffmpeg found)' : 'needs ffmpeg — winget install Gyan.FFmpeg'}`),
+    )
+  }
+  if (autopilot) {
+    autopilot.start()
+    console.log(`[jarvis] autopilot ${ALLOW_WRITES ? 'publisher running' : 'idle (needs --writes)'}`)
+  }
+  if (pipelines) {
+    const s = (b) => pipelines.summary(b).stages.reduce((a, x) => a + x.count, 0)
+    console.log(`[jarvis] pipelines: agency ${s('agency')} · youtube ${s('youtube')} cards — board at http://localhost:${PORT}/board`)
+  }
+  if (!ALLOW_WRITES) console.log('[jarvis] creator suite is read-only — start with --writes to render, post and run the autopilot')
+}
 if (DISABLED.size) console.log(`[jarvis] disabled: ${[...DISABLED].join(', ')}`)
 if (!DISABLED.has('browser')) void chromeAvailable().then((ok) => {
   console.log(
@@ -1323,6 +1578,10 @@ wss.on('connection', (socket) => {
     if (!failed) sendTurn({ type: 'tool', name })
   }
 
+  // A local brain gets a lean session: a small model on a laptop chokes on
+  // the full toolset (tens of thousands of prompt tokens before a word).
+  const lean = brain.mode === 'local'
+
   const session = query({
     prompt: userMessages(),
     options: {
@@ -1330,7 +1589,10 @@ wss.on('connection', (socket) => {
       // server. The HUD's handler closes over this socket, so a `display` call
       // lands on screen directly — which is also why this object is built per
       // connection rather than once.
-      mcpServers: {
+      mcpServers: lean ? {
+        // Laptop tools only: the HUD's display schemas alone are thousands of tokens.
+        ...(SYSTEM_ON ? { jarvis_system: systemServer({ allowWrites: ALLOW_WRITES, live: true, brain: { describe: brain.describe, set: async (a) => { const d = await brain.set(a); restartSessions(7000); return d } } }) } : {}),
+      } : {
         ...MCP_SERVERS,
         jarvis: displayServer(
           (panel) => send({ type: 'panel', panel }),
@@ -1352,22 +1614,15 @@ wss.on('connection', (socket) => {
           : { jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) }),
         // The camera, which unlike everything else here has to ask and wait.
         ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(ask) }),
-        // The user's YouTube channel. Like the browser, it builds its acting
-        // tools only when writes are on; uploads are confined to TOOL_ROOTS.
-        ...(YOUTUBE_ON
-          ? {
-              jarvis_youtube: youtubeServer({
-                allowWrites: ALLOW_WRITES,
-                checkPath: (p) => pathProblem(p, { cwd: WORKSPACE, roots: TOOL_ROOTS }),
-              }),
-            }
-          : {}),
+        // The creator suite: channels, studio, crypto, autopilot. Each builds
+        // its acting tools only when writes are on; files stay in TOOL_ROOTS.
+        ...creatorServers(),
       },
       // A plain system prompt, not the claude_code preset. The preset is
       // tuned for a coding agent — verbose, file-oriented, and a large chunk
       // of input tokens on every turn. Replacing it makes the persona stick,
       // keeps answers short enough to speak, and cuts cost per turn.
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: lean ? PROMPT_LOCAL : SYSTEM_PROMPT,
       // Run from JARVIS's own workspace rather than the home directory. MCP
       // discovery does not depend on it — settingSources is empty and the
       // servers are passed in explicitly above — and file tools resolve
@@ -1399,8 +1654,8 @@ wss.on('connection', (socket) => {
       // Normally your own `/model` preference would decide, but that lives in
       // the settings files `settingSources: []` deliberately stops loading, so
       // without this line nothing in the project has a say at all.
-      model: MODEL,
-      effort: EFFORT,
+      // The current brain: cloud Claude (model + effort) or local Ollama (model + env).
+      ...brain.options(),
       maxTurns: 24,
       // Nothing resumes a JARVIS session — every socket starts a new one — so
       // the transcript the SDK writes by default is only ever a record: every

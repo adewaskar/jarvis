@@ -6,6 +6,7 @@ import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
+import { Deck } from './Deck'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -186,6 +187,9 @@ export function Hud() {
       <Corner at="tr" />
       <Corner at="bl" />
       <Corner at="br" />
+
+      {/* The command deck: live panels framing the reactor (wide screens). */}
+      {ui.chrome.systems && <Deck />}
 
       <header className="hud-top">
         {ui.chrome.brand && (

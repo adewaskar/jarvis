@@ -69,7 +69,7 @@ const slimVideo = (v) => ({
   url: `https://www.youtube.com/watch?v=${v.id?.videoId ?? v.contentDetails?.videoId ?? v.id}`,
 })
 
-async function myChannel() {
+export async function myChannel() {
   const data = await yt('/channels', {
     query: { part: 'snippet,statistics,contentDetails,brandingSettings', mine: true },
   })
@@ -88,6 +88,42 @@ async function videoDetails(ids) {
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.avi', '.wmv', '.flv', '.webm', '.mkv', '.3gp', '.mpeg', '.mpg'])
 const IMAGE_MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png' }
+
+/** Resumable upload of a local file. Shared with the autopilot. */
+export async function youtubeUpload(path, { title, description = '', tags, categoryId = '22', privacy = 'private', madeForKids = false }) {
+  if (!VIDEO_EXT.has(extname(path).toLowerCase())) throw new Error(`${basename(path)} is not a video file.`)
+  const size = (await stat(path)).size
+  const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${await accessToken()}`,
+      'content-type': 'application/json; charset=UTF-8',
+      'x-upload-content-length': String(size),
+      'x-upload-content-type': 'video/*',
+    },
+    body: JSON.stringify({
+      snippet: { title: String(title).slice(0, 100), description, tags, categoryId },
+      status: { privacyStatus: privacy, selfDeclaredMadeForKids: madeForKids },
+    }),
+  })
+  if (!init.ok) {
+    const e = await init.json().catch(() => ({}))
+    throw new Error(`YouTube refused the upload: ${e?.error?.message ?? init.status}`)
+  }
+  const put = await fetch(init.headers.get('location'), {
+    method: 'PUT',
+    headers: { 'content-type': 'video/*', 'content-length': String(size) },
+    body: await readFile(path),
+  })
+  const out = await put.json().catch(() => ({}))
+  if (!put.ok) throw new Error(`Upload failed: ${out?.error?.message ?? put.status}`)
+  return {
+    uploaded: out.id,
+    privacy: out.status?.privacyStatus,
+    url: `https://www.youtube.com/watch?v=${out.id}`,
+    studio: `https://studio.youtube.com/video/${out.id}/edit`,
+  }
+}
 
 /**
  * @param {{ allowWrites: boolean, checkPath: (p: string) => string | null }} opts
@@ -364,42 +400,7 @@ review it before it goes public — only choose public if they said so.`,
         try {
           const problem = checkPath(path)
           if (problem) throw new Error(problem)
-          if (!VIDEO_EXT.has(extname(path).toLowerCase())) throw new Error(`${basename(path)} is not a video file.`)
-          const size = (await stat(path)).size
-          const init = await fetch(
-            'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
-            {
-              method: 'POST',
-              headers: {
-                authorization: `Bearer ${await accessToken()}`,
-                'content-type': 'application/json; charset=UTF-8',
-                'x-upload-content-length': String(size),
-                'x-upload-content-type': 'video/*',
-              },
-              body: JSON.stringify({
-                snippet: { title, description, tags, categoryId },
-                status: { privacyStatus: privacy, selfDeclaredMadeForKids: madeForKids },
-              }),
-            },
-          )
-          if (!init.ok) {
-            const e = await init.json().catch(() => ({}))
-            throw new Error(`YouTube refused the upload: ${e?.error?.message ?? init.status}`)
-          }
-          const where = init.headers.get('location')
-          const put = await fetch(where, {
-            method: 'PUT',
-            headers: { 'content-type': 'video/*', 'content-length': String(size) },
-            body: await readFile(path),
-          })
-          const out = await put.json().catch(() => ({}))
-          if (!put.ok) throw new Error(`Upload failed: ${out?.error?.message ?? put.status}`)
-          return ok({
-            uploaded: out.id,
-            privacy: out.status?.privacyStatus,
-            url: `https://www.youtube.com/watch?v=${out.id}`,
-            studio: `https://studio.youtube.com/video/${out.id}/edit`,
-          })
+          return ok(await youtubeUpload(path, { title, description, tags, categoryId, privacy, madeForKids }))
         } catch (e) {
           return fail(e)
         }

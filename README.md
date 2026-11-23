@@ -153,8 +153,9 @@ is roughly:
 - **Voice** — `elevenlabs`
 - **Your phone** — `android`
 - **The browser** — `playwright`
-- **Your YouTube channel** — built in: stats, analytics, comments, uploads,
-  edits, playlists. One-time sign-in: see [YOUTUBE.md](YOUTUBE.md).
+- **The creator suite** — built in: your YouTube, TikTok and Instagram, a video
+  studio, a posting autopilot, the Agency leads and YouTube pipelines, and crypto
+  prices, wallets and payment links. See [CREATOR.md](CREATOR.md).
 
 A few things you can say:
 
@@ -238,7 +239,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
 | `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
 | `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
-| `JARVIS_DISABLE` | none | Comma-separated capabilities to leave out: `browser`, `camera`, `interface`, `youtube` |
+| `JARVIS_DISABLE` | none | Comma-separated capabilities to leave out: `browser`, `camera`, `interface`, `youtube`, `tiktok`, `instagram`, `studio`, `crypto`, `autopilot`, `pipelines` |
 | `JARVIS_ALLOWED_ORIGINS` | local dev | Extra WebSocket origins to accept |
 | `JARVIS_ALLOW_NO_ORIGIN` | off | Accept connections with no `Origin` header |
 | `JARVIS_WORKSPACE` | `~/.jarvis/workspace` | The agent's working directory; file tools are confined to it and the temp directory |
