@@ -118,7 +118,7 @@ export async function speak(text: string): Promise<string | null> {
       voice,
       // Slightly under natural pace — the character is never hurried, and the
       // steadiness is most of the characterisation.
-      speed: 0.95,
+      speed: 1.15,
     })
     failures = 0
     return URL.createObjectURL(audio.toBlob())

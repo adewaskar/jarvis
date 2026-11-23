@@ -194,7 +194,7 @@ const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5'
  * matters more than pace; drop back to 'low' when filming and every second of
  * dead air shows.
  */
-const EFFORT = process.env.JARVIS_EFFORT ?? 'high'
+const EFFORT = process.env.JARVIS_EFFORT ?? 'medium'
 
 /**
  * Every MCP server Claude Code has configured, read out of its own config.
@@ -917,7 +917,7 @@ const handleRequest = async (req, res) => {
             voice_settings: {
               stability: 0.4,
               similarity_boost: 0.75,
-              speed: 1.05,
+              speed: 1.15,
             },
           }),
         },

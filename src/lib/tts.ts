@@ -481,7 +481,7 @@ export function createSpeaker(): Speaker {
       // Deliberate, and deliberately invariant — the character's pace does not
       // change with stakes, and that steadiness is most of the effect. This
       // lands around 130 wpm, below the median for film dialogue.
-      u.rate = 0.92
+      u.rate = 1.15
       // Mid-baritone, and *not* pushed lower for gravitas. The voice is
       // clarity-weighted rather than chest-weighted; dropping it further reads
       // as a film-trailer voiceover, which is the wrong character entirely.
@@ -769,7 +769,7 @@ async function fetchCloudAudio(text: string): Promise<string | null> {
             voice_settings: {
               stability: 0.4,
               similarity_boost: 0.75,
-              speed: 1.05,
+              speed: 1.15,
             },
           }),
         },
