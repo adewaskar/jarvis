@@ -21,6 +21,8 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
+import { youtubeServer } from './youtube.mjs'
+import { youtubeConnected } from './youtube-auth.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
@@ -33,6 +35,7 @@ import {
   decideTool as decidePolicy,
   fetchTargetProblem,
   fileRoots,
+  pathProblem,
 } from './policy.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
@@ -469,6 +472,21 @@ const PROMPT_EYES = `Your eyes:
   list of pictures. They know what their own hands look like.
 
 `
+const PROMPT_YOUTUBE = `Their YouTube channel — the \`jarvis_youtube\` tools:
+- You are signed in to the user's own channel. "My channel", "my videos", "my
+  comments", "how did my last video do" all mean these tools, not a web search.
+- Put numbers on a blade — a stats panel, a chart of views by day, a table of
+  top videos — and say only the headline aloud: "Forty-one thousand views this
+  month, sir, up twelve percent."
+- For ideas, titles, descriptions, tags and scripts: look at what already works
+  first (get_analytics by video, search_youtube for the niche), then write. Show
+  drafts on a blade before changing anything.
+- Uploads go up PRIVATE unless they say public. Before replying to comments or
+  changing a live video, say in one line what you are about to do.
+- If a write tool is missing, the bridge is in read-only mode: say once that
+  changing the channel needs JARVIS started with writes.
+
+`
 const PROMPT_TOOLS = `Using tools:
 - You have real tools on this machine. Use them rather than guessing.
 - Never narrate that you're about to use one. No "Let me search for that" or
@@ -481,12 +499,19 @@ const PROMPT_TOOLS = `Using tools:
 - If a tool fails or isn't connected, one plain sentence saying so.
 - If you don't know, say you don't know.`
 
+/**
+ * YouTube joins once `npm run youtube:connect` has saved a token, and can be
+ * left out like the other built-ins with JARVIS_DISABLE=youtube.
+ */
+const YOUTUBE_ON = !DISABLED.has('youtube') && youtubeConnected()
+
 const SYSTEM_PROMPT = [
   PROMPT_CORE,
   PROMPT_BLADES,
   DISABLED.has('interface') ? '' : PROMPT_INTERFACE,
   DISABLED.has('browser') ? '' : PROMPT_BROWSER,
   DISABLED.has('camera') ? '' : PROMPT_EYES,
+  YOUTUBE_ON ? PROMPT_YOUTUBE : '',
   PROMPT_TOOLS,
 ].join('')
 
@@ -1099,6 +1124,15 @@ console.log(
 // at all because an extension that is simply not running is indistinguishable
 // at the tool boundary from one that is broken, and this is the one place the
 // difference can be stated before anybody asks a question that depends on it.
+console.log(
+  `[jarvis] youtube ${
+    DISABLED.has('youtube')
+      ? 'disabled'
+      : YOUTUBE_ON
+        ? `connected${ALLOW_WRITES ? ' · can edit, upload and reply' : ' · read-only (start with --writes to edit, upload and reply)'}`
+        : 'not connected — run `npm run youtube:connect` (see YOUTUBE.md)'
+  }`,
+)
 if (DISABLED.size) console.log(`[jarvis] disabled: ${[...DISABLED].join(', ')}`)
 if (!DISABLED.has('browser')) void chromeAvailable().then((ok) => {
   console.log(
@@ -1318,6 +1352,16 @@ wss.on('connection', (socket) => {
           : { jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) }),
         // The camera, which unlike everything else here has to ask and wait.
         ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(ask) }),
+        // The user's YouTube channel. Like the browser, it builds its acting
+        // tools only when writes are on; uploads are confined to TOOL_ROOTS.
+        ...(YOUTUBE_ON
+          ? {
+              jarvis_youtube: youtubeServer({
+                allowWrites: ALLOW_WRITES,
+                checkPath: (p) => pathProblem(p, { cwd: WORKSPACE, roots: TOOL_ROOTS }),
+              }),
+            }
+          : {}),
       },
       // A plain system prompt, not the claude_code preset. The preset is
       // tuned for a coding agent — verbose, file-oriented, and a large chunk
