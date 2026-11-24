@@ -50,6 +50,8 @@ export type Blade = {
   mode?: 'reader' | 'live'
   size: 'compact' | 'tall' | 'wide' | 'full'
   hold: 'turn' | 'sticky'
+  /** video: start playing as soon as it opens (JARVIS's own renders). */
+  autoplay?: boolean
 }
 
 export type Turn = {

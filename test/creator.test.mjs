@@ -11,7 +11,7 @@ import { systemServer } from '../bridge/system.mjs'
 const READS = {
   jarvis_tiktok: ['get_tiktok_profile', 'list_tiktok_videos', 'get_tiktok_creator_settings', 'check_tiktok_progress'],
   jarvis_instagram: ['get_instagram_profile', 'list_instagram_media', 'get_instagram_insights', 'list_instagram_comments'],
-  jarvis_studio: ['get_media_info'],
+  jarvis_studio: ['get_media_info', 'list_studio_videos', 'show_video'],
   jarvis_crypto: ['get_crypto_prices', 'get_crypto_chart', 'get_wallet_balances', 'list_wallet_transactions', 'get_crypto_invoice'],
   jarvis_autopilot: ['get_autopilot_settings', 'list_queue', 'list_products', 'list_brand_deals'],
   jarvis_pipelines: ['list_pipeline', 'get_pipeline_card'],

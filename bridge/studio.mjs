@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { spawn } from 'node:child_process'
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
 import { safe } from './secrets.mjs'
@@ -98,7 +98,7 @@ function evenSrt(text, duration) {
 /**
  * @param {{ allowWrites: boolean, checkPath: (p: string) => string|null, workspace: string, elevenKey: () => string|null, voiceId?: string }} o
  */
-export function studioServer({ allowWrites, checkPath, workspace, elevenKey, voiceId }) {
+export function studioServer({ allowWrites, checkPath, workspace, elevenKey, voiceId, onRendered = null }) {
   const need = (p) => {
     const problem = checkPath(p)
     if (problem) throw new Error(problem)
@@ -177,6 +177,40 @@ export function studioServer({ allowWrites, checkPath, workspace, elevenKey, voi
       { path: z.string() },
       safe(async ({ path }) => probe(need(path))),
     ),
+    tool(
+      'list_studio_videos',
+      'The videos JARVIS has rendered, newest first: path, title, size, when. Use it to find "the last video you made".',
+      { limit: z.number().int().min(1).max(30).optional() },
+      safe(async ({ limit = 10 }) => {
+        const root = join(workspace, 'studio')
+        const dirs = await readdir(root).catch(() => [])
+        const found = []
+        for (const d of dirs) {
+          for (const name of await readdir(join(root, d)).catch(() => [])) {
+            // The finished video is <title>.mp4; the rest are working files.
+            if (!/.mp4$/i.test(name) || /^(silent|cut|scene-d+).mp4$/i.test(name)) continue
+            const p = join(root, d, name)
+            const st = await stat(p).catch(() => null)
+            if (st?.isFile()) found.push({ path: p, title: d.replace(/^d[d-]*-/, '').replace(/-/g, ' '), mb: +(st.size / 1e6).toFixed(1), made: st.mtime.toISOString() })
+          }
+        }
+        return found.sort((a, b) => b.made.localeCompare(a.made)).slice(0, limit)
+      }),
+    ),
+    ...(onRendered
+      ? [
+          tool(
+            'show_video',
+            'Put a local video on the screen and play it (a render from list_studio_videos, or a file in the footage folder). Finished renders already show themselves; use this to replay one.',
+            { path: z.string(), title: z.string().optional() },
+            safe(async ({ path, title }) => {
+              need(path)
+              onRendered({ path, title: title ?? basename(path) })
+              return { showing: path }
+            }),
+          ),
+        ]
+      : []),
   ]
 
   const writes = [
@@ -273,7 +307,8 @@ seconds share its length. Output is ready for TikTok, Reels and Shorts.`,
         }
         const out = join(dir, `${slug(title)}.mp4`)
         await finish({ dir, video: join(dir, 'silent.mp4'), voice: vo, music, musicVolume, captionsFile, out })
-        return { video: out, ...(await probe(out)) }
+        onRendered?.({ path: out, title })
+        return { video: out, shownOnScreen: Boolean(onRendered), ...(await probe(out)) }
       }),
     ),
     tool(
@@ -316,7 +351,8 @@ Use create_captions on the full video first to find the best start and end times
         }
         const out = join(dir, `${slug(title)}.mp4`)
         await finish({ dir, video: join(dir, 'cut.mp4'), music, musicVolume, keepOriginalAudio: info.hasAudio, captionsFile, out })
-        return { video: out, ...(await probe(out)) }
+        onRendered?.({ path: out, title })
+        return { video: out, shownOnScreen: Boolean(onRendered), ...(await probe(out)) }
       }),
     ),
   ]

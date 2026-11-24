@@ -493,6 +493,9 @@ const PROMPT_CREATOR = `The creator suite — their channels, studio and money:
   create_voiceover, generate images with any generation server you have, then
   render_short. For their own footage: create_captions to read it, pick the best
   moment, render_clip. Hook in the first two seconds; 20 to 45 seconds total.
+  A finished video opens on screen and plays by itself: say it's ready in one
+  line and stop. Don't describe it or read out file paths. To replay one, use
+  list_studio_videos then show_video ("show me the last video").
 - To post to several platforms use create_scheduled_post; it obeys daily caps
   that keep the accounts from being flagged as bots. Disclose paid partnerships
   (brandContent) and own-product promotion (brandOrganic).
@@ -604,7 +607,7 @@ const deck = createDeck({
  * conversation with the user present; the autopilot's headless runs are not,
  * so they cannot record the user's approvals on the pipelines.
  */
-function creatorServers({ live = true } = {}) {
+function creatorServers({ live = true, show = null } = {}) {
   const opts = { allowWrites: ALLOW_WRITES, checkPath: checkToolPath }
   return {
     ...(pipelines
@@ -614,7 +617,16 @@ function creatorServers({ live = true } = {}) {
     ...(TIKTOK_ON ? { jarvis_tiktok: tiktokServer(opts) } : {}),
     ...(INSTAGRAM_ON ? { jarvis_instagram: instagramServer(opts) } : {}),
     ...(STUDIO_ON
-      ? { jarvis_studio: studioServer({ ...opts, workspace: WORKSPACE, elevenKey, voiceId: process.env.JARVIS_VOICE_ID }) }
+      ? {
+          jarvis_studio: studioServer({
+            ...opts,
+            workspace: WORKSPACE,
+            elevenKey,
+            voiceId: process.env.JARVIS_VOICE_ID,
+            // Live sessions put every finished video on screen and play it.
+            onRendered: show,
+          }),
+        }
       : {}),
     ...(CRYPTO_ON ? { jarvis_crypto: cryptoServer({ ...opts, workspace: WORKSPACE }) } : {}),
     ...(autopilot ? { jarvis_autopilot: autopilot.makeServer() } : {}),
@@ -968,6 +980,47 @@ const handleRequest = async (req, res) => {
   }
 
   // The command deck's live feed: machine, channels, pipelines, queue, crypto.
+  // Local videos JARVIS made (or footage), streamed with Range support so the
+  // player can seek. Video files only, and only inside the workspace.
+  if (req.method === 'GET' && req.url?.startsWith('/video?')) {
+    const asked = new URL(req.url, 'http://x').searchParams.get('path') ?? ''
+    let real = null
+    try {
+      if (isAbsolute(asked)) real = await realpath(asked)
+    } catch {
+      real = null
+    }
+    const ext = real ? real.slice(real.lastIndexOf('.')).toLowerCase() : ''
+    const type = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm' }[ext]
+    const ws = realpathSync(WORKSPACE)
+    const rel = real ? relative(ws, real) : '..'
+    if (!type || rel.startsWith('..') || isAbsolute(rel)) {
+      res.writeHead(400, cors)
+      return res.end('workspace videos only')
+    }
+    try {
+      const { size } = await stat(real)
+      const { createReadStream } = await import('node:fs')
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '')
+      const head = { ...cors, 'content-type': type, 'accept-ranges': 'bytes', 'x-content-type-options': 'nosniff' }
+      if (m) {
+        const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]))
+        const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1
+        if (start >= size || start > end) {
+          res.writeHead(416, { ...cors, 'content-range': `bytes */${size}` })
+          return res.end()
+        }
+        res.writeHead(206, { ...head, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 })
+        return createReadStream(real, { start, end }).pipe(res)
+      }
+      res.writeHead(200, { ...head, 'content-length': size })
+      return createReadStream(real).pipe(res)
+    } catch {
+      res.writeHead(404, cors)
+      return res.end('not found')
+    }
+  }
+
   // The brain switcher. POST needs a custom header, which a cross-site form cannot send.
   if (req.url === '/brain' && (req.method === 'GET' || req.method === 'POST')) {
     const json = (code, body) => {
@@ -1616,7 +1669,13 @@ wss.on('connection', (socket) => {
         ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(ask) }),
         // The creator suite: channels, studio, crypto, autopilot. Each builds
         // its acting tools only when writes are on; files stay in TOOL_ROOTS.
-        ...creatorServers(),
+        ...creatorServers({
+          show: ({ path, title }) =>
+            send({
+              type: 'blade',
+              blade: { id: `v${Date.now().toString(36)}`, title: String(title || 'NEW VIDEO').toUpperCase(), kind: 'video', url: path, size: 'wide', hold: 'sticky', autoplay: true },
+            }),
+        }),
       },
       // A plain system prompt, not the claude_code preset. The preset is
       // tuned for a coding agent — verbose, file-oriented, and a large chunk
