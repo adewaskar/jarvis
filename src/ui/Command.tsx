@@ -360,7 +360,11 @@ function YouTube({ d }: { d: Snapshot | null }) {
           <div className="cmd-kv"><span>Total views</span><b>{compact(yt.views)}</b></div>
           <div className="cmd-kv"><span>Subscribers</span><b>{compact(yt.followers)}</b></div>
           <div className="cmd-kv"><span>Videos</span><b>{compact(yt.posts)}</b></div>
-          <div className="cmd-dim small">Next Shorts: {(d?.autopilot.times ?? []).join(' & ') || '—'}</div>
+          {d?.autopilot.channels?.length ? (
+            <div className="cmd-dim small">Channels: {d.autopilot.channels.filter((c) => c.enabled).map((c) => c.id).join(', ') || '—'}</div>
+          ) : (
+            <div className="cmd-dim small">Next Shorts: {(d?.autopilot.times ?? []).join(' & ') || '—'}</div>
+          )}
         </>
       ) : (
         <div className="cmd-dim">{yt?.error ? `Error: ${yt.error}` : 'Not connected'}</div>

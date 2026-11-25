@@ -26,7 +26,7 @@ export type Snapshot = {
   }
   channels: Record<'youtube' | 'tiktok' | 'instagram', null | { name?: string; followers?: number | null; views?: number | null; likes?: number | null; posts?: number | null; error?: string }>
   pipelines: { board: string; title: string; stages: { stage: string; label: string; approval: boolean; count: number }[] }[]
-  autopilot: { enabled: boolean; niche: string | null; times: string[]; queued: number; recent: { title: string; at: string | null; platforms: string[]; status: string }[] }
+  autopilot: { enabled: boolean; niche: string | null; times: string[]; channels?: { id: string; niche: string; enabled: boolean }[]; queued: number; recent: { title: string; at: string | null; platforms: string[]; status: string }[] }
   crypto: { symbol: string; usd: number | null; change24h: number | null }[]
   weather?: { place: string; tempC: number | null; code: number | null; day: boolean } | null
   security?: { ok: boolean | null; issues: string[]; antivirus?: string[]; checked: string } | null

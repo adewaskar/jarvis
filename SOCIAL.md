@@ -1,4 +1,4 @@
-# Connecting TikTok and Instagram
+# Connecting TikTok, Instagram and Facebook
 
 JARVIS posts through each platform's **official API**, signed in as you. Both
 platforms make you register a free "developer app" first. Only you can do that,
@@ -82,6 +82,66 @@ command again.
 
 ---
 
+## Facebook Page
+
+JARVIS posts Reels to a Facebook **Page** (not a personal profile).
+
+### Steps you do yourself
+1. Make a Page if you don't have one: <https://www.facebook.com/pages/create>.
+2. At <https://developers.facebook.com>, **My Apps → Create app**. Pick the use
+   case **"Manage everything on your Page"** (or add **Facebook Login for
+   Business** to an existing app).
+3. In **App settings → Basic**, copy the **App ID** and **App secret**.
+4. In **Facebook Login → Settings**, add the redirect URI above to **Valid
+   OAuth Redirect URIs** and save.
+5. Leave the app in **Development** mode. It works for Pages you manage without
+   App Review.
+6. Connect JARVIS:
+   ```powershell
+   npm run social:connect -- facebook
+   ```
+   Paste the App ID, the secret and the redirect URI. On Facebook's screen, tick
+   the Page and allow posting. If you manage several Pages, the terminal asks
+   which one.
+
+The Page sign-in doesn't expire while you stay an admin of the Page and keep the
+app. Reels are labelled as AI-generated, as Meta asks.
+
+---
+
+## More than one channel
+
+The autopilot can run up to **5 channels**, each with its own niche and its own
+accounts. You make the accounts and channels yourself: JARVIS can't, and
+platforms ban accounts that bots create.
+
+- **YouTube**: one Google account can own several channels. Make one at
+  <https://www.youtube.com/account> → **Add or manage your channel(s)** →
+  **Create a channel**.
+- **TikTok**: in the app, tap your profile name → **Add account**.
+- **Instagram**: **Settings → Add account**, then switch it to Professional.
+- **Facebook**: make another Page at <https://www.facebook.com/pages/create>.
+
+Then connect each one under the channel's name. The same developer apps work for
+every account:
+
+```powershell
+npm run youtube:connect -- --account cooking
+npm run social:connect -- tiktok --account cooking
+npm run social:connect -- instagram --account cooking
+npm run social:connect -- facebook --account cooking
+```
+
+On TikTok and Instagram, use an account you added as a tester (or make it the
+one you're signed in as). On YouTube, pick the right channel on Google's screen.
+
+Finally tell JARVIS: *"Add a channel called cooking: ten-minute dinners, post at
+10am on all four platforms."* The `cooking` channel posts with the accounts
+connected as `cooking`, and the bridge log lists them as
+`[jarvis] extra channel accounts: ...`.
+
+---
+
 ## Restart JARVIS
 
 ```powershell
@@ -89,6 +149,6 @@ npm start -- --writes
 ```
 
 The bridge log shows which platforms are connected:
-`[jarvis] creator: youtube connected · tiktok connected · instagram connected`.
+`[jarvis] creator: youtube connected · tiktok connected · instagram connected · facebook connected`.
 
 To start over with different app details, run `npm run social:connect -- tiktok --reset`.

@@ -3,6 +3,7 @@ import { open, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { z } from 'zod'
 import { hasSecret, readSecret, safe, saveSecret } from './secrets.mjs'
+import { accountSecret, listAccounts } from './accounts.mjs'
 
 /**
  * TikTok, through the official Content Posting API and Display API.
@@ -16,14 +17,17 @@ import { hasSecret, readSecret, safe, saveSecret } from './secrets.mjs'
 const API = 'https://open.tiktokapis.com/v2'
 export const TIKTOK_SCOPES = 'user.info.basic,user.info.profile,user.info.stats,video.list,video.publish,video.upload'
 
-export const tiktokConnected = () => hasSecret('tiktok')
+export const tiktokConnected = () => hasSecret('tiktok') || listAccounts('tiktok').length > 0
 
-let refreshing = null
+/** One refresh in flight per account. */
+const refreshing = new Map()
 async function token() {
-  const t = readSecret('tiktok')
-  if (!t?.refresh_token) throw new Error('TikTok is not connected. The user needs to run: npm run social:connect -- tiktok')
+  const name = accountSecret('tiktok')
+  const t = readSecret(name)
+  if (!t?.refresh_token) throw new Error(`TikTok ${name} is not connected. The user needs to run: npm run social:connect -- tiktok`)
   if (t.access_token && Date.now() < t.expires_at - 60_000) return t.access_token
-  refreshing ??= (async () => {
+  if (refreshing.has(name)) return refreshing.get(name)
+  const p = (async () => {
     const res = await fetch(`${API}/oauth/token/`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -38,15 +42,16 @@ async function token() {
     if (!res.ok || !b.access_token) {
       throw new Error(`TikTok sign-in expired (${b.error ?? res.status}). Run: npm run social:connect -- tiktok`)
     }
-    saveSecret('tiktok', {
+    saveSecret(name, {
       ...t,
       access_token: b.access_token,
       refresh_token: b.refresh_token ?? t.refresh_token,
       expires_at: Date.now() + b.expires_in * 1000,
     })
     return b.access_token
-  })().finally(() => (refreshing = null))
-  return refreshing
+  })().finally(() => refreshing.delete(name))
+  refreshing.set(name, p)
+  return p
 }
 
 async function tt(path, { method = 'GET', body } = {}) {

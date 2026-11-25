@@ -6,12 +6,14 @@ import { join } from 'node:path'
 import { decideTool } from '../bridge/policy.mjs'
 import { createPipelines } from '../bridge/pipelines.mjs'
 import { createAutopilot } from '../bridge/autopilot.mjs'
+import { accountArg, accountSecret, currentAccount, listAccounts, withAccount, withoutAccountArg } from '../bridge/accounts.mjs'
 import { systemServer } from '../bridge/system.mjs'
 
 const READS = {
   jarvis_tiktok: ['get_tiktok_profile', 'list_tiktok_videos', 'get_tiktok_creator_settings', 'check_tiktok_progress'],
   jarvis_instagram: ['get_instagram_profile', 'list_instagram_media', 'get_instagram_insights', 'list_instagram_comments'],
   jarvis_studio: ['get_media_info', 'list_studio_videos', 'show_video'],
+  jarvis_facebook: ['get_facebook_page'],
   jarvis_crypto: ['get_crypto_prices', 'get_crypto_chart', 'get_wallet_balances', 'list_wallet_transactions', 'get_crypto_invoice'],
   jarvis_autopilot: ['get_autopilot_settings', 'list_queue', 'list_products', 'list_brand_deals'],
   jarvis_pipelines: ['list_pipeline', 'get_pipeline_card'],
@@ -23,7 +25,7 @@ const WRITES = {
   jarvis_instagram: ['upload_instagram_reel', 'post_instagram_comment_reply'],
   jarvis_studio: ['create_image', 'create_voiceover', 'create_captions', 'render_short', 'render_clip'],
   jarvis_crypto: ['create_nft_package'],
-  jarvis_autopilot: ['update_autopilot_settings', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
+  jarvis_autopilot: ['update_autopilot_settings', 'update_autopilot_channel', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
   jarvis_pipelines: ['create_pipeline_card', 'update_pipeline_card', 'delete_pipeline_card'],
   jarvis_system: ['launch_app', 'launch_link', 'close_app', 'set_volume', 'lock_computer', 'sleep_computer', 'schedule_shutdown', 'cancel_shutdown'],
   jarvis_agency: ['update_agency_settings', 'launch_agency_run', 'call_owner'],
@@ -118,4 +120,59 @@ test('laptop power tools exist only in live sessions with writes', () => {
   const headless = names({ allowWrites: true, live: false })
   for (const t of ['sleep_computer', 'schedule_shutdown', 'cancel_shutdown']) assert.ok(!headless.includes(t), t)
   assert.ok(names({ allowWrites: true, live: true }).includes('schedule_shutdown'))
+})
+
+test('accounts: names, files and the current account', async () => {
+  assert.equal(accountSecret('tiktok', null), 'tiktok')
+  assert.equal(accountSecret('tiktok', 'cooking'), 'tiktok@cooking')
+  assert.equal(currentAccount(), null)
+  assert.equal(await withAccount('cooking', async () => accountSecret('youtube')), 'youtube@cooking')
+  assert.equal(accountSecret('youtube'), 'youtube', 'back to main outside withAccount')
+  assert.throws(() => withAccount('../etc', () => 0), /not a valid account name/)
+  const dir = mkdtempSync(join(tmpdir(), 'jarvis-acct-'))
+  for (const n of ['tiktok.json', 'tiktok@space.json', 'tiktok@cooking.json', 'tiktok-app.json', 'youtube@cars.json']) writeFileSync(join(dir, n), '{}')
+  assert.deepEqual(listAccounts('tiktok', dir), ['main', 'cooking', 'space'])
+  assert.deepEqual(listAccounts('youtube', dir), ['cars'])
+  assert.equal(accountArg(['node', 'x', 'tiktok', '--account', 'Cooking']), 'cooking')
+  assert.equal(accountArg(['node', 'x', '--account=main']), null)
+  assert.deepEqual(withoutAccountArg(['node', 'x', '--account', 'a', 'file.json']), ['node', 'x', 'file.json'])
+})
+
+test('autopilot runs several channels, each through its own accounts', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'jarvis-ch-'))
+  const video = join(ws, 'v.mp4')
+  writeFileSync(video, 'x')
+  const posted = []
+  const pub = (platform) => async (it) => (posted.push(`${platform}:${currentAccount() ?? 'main'}:${it.title}`), { id: 'p' })
+  const connected = new Set(['youtube:main', 'youtube:cooking', 'facebook:cooking', 'tiktok:space'])
+  const ap = createAutopilot({
+    workspace: ws,
+    allowWrites: true,
+    checkPath: () => null,
+    publishers: { youtube: pub('youtube'), tiktok: pub('tiktok'), facebook: pub('facebook') },
+    isConnected: (p, a) => connected.has(`${p}:${a ?? 'main'}`),
+    runAgent: async () => 'ok',
+  })
+  const srv = ap.makeServer()
+  assert.equal((await call(srv, 'update_autopilot_channel', { id: 'cooking', niche: 'Ten-minute dinners', platforms: ['youtube', 'facebook'] })).error, undefined)
+  assert.equal((await call(srv, 'update_autopilot_channel', { id: 'space', niche: 'Space facts', platforms: ['tiktok', 'youtube'], accounts: { youtube: 'main' } })).error, undefined)
+  // Same niche twice is refused; so is a sixth channel.
+  assert.match((await call(srv, 'update_autopilot_channel', { id: 'dinners', niche: 'ten minute dinners!' })).data, /already has that niche/)
+  for (const n of ['a', 'b', 'c']) await call(srv, 'update_autopilot_channel', { id: n, niche: `niche ${n}` })
+  assert.match((await call(srv, 'update_autopilot_channel', { id: 'f', niche: 'one too many' })).data, /already 5 channels/)
+  // Posting to an unknown channel is refused.
+  assert.equal((await call(srv, 'create_scheduled_post', { video, title: 'x', channel: 'nope', platforms: ['youtube'] })).error, true)
+
+  await call(srv, 'create_scheduled_post', { video, title: 'pasta', channel: 'cooking', platforms: ['youtube', 'facebook'] })
+  await call(srv, 'create_scheduled_post', { video, title: 'mars', channel: 'space', platforms: ['tiktok', 'youtube'] })
+  await call(srv, 'create_scheduled_post', { video, title: 'soup', channel: 'cooking', platforms: ['youtube'] })
+  await ap.publishDue()
+  // cooking posts with youtube@cooking and facebook@cooking; space uses tiktok@space and the main YouTube.
+  // Each new channel defaults to 1 post per platform per day, so "soup" waits.
+  assert.deepEqual(posted, ['youtube:cooking:pasta', 'facebook:cooking:pasta', 'tiktok:space:mars', 'youtube:main:mars'])
+  const st = (await call(srv, 'get_autopilot_settings', {})).data
+  const cooking = st.channels.find((c) => c.id === 'cooking')
+  assert.deepEqual(cooking.accounts.youtube, { account: 'cooking', connected: true })
+  assert.equal(cooking.postedToday.youtube, 1)
+  assert.equal(st.channels.length, 5)
 })

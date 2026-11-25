@@ -10,6 +10,10 @@
  * Opens Google's consent screen in your browser, catches the reply on a
  * loopback port, and saves a refresh token to ~/.jarvis/secrets/youtube.json.
  * Nothing leaves this machine except the exchange with Google itself.
+ *
+ * More channels: `npm run youtube:connect -- --account cooking` saves a second
+ * channel as youtube@cooking.json. On Google's screen, pick that channel (a
+ * Google account can own several channels; make them at youtube.com/account).
  */
 
 import { createServer } from 'node:http'
@@ -18,11 +22,14 @@ import { existsSync, readFileSync, copyFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { SCOPES, SECRETS_DIR, saveToken } from '../bridge/youtube-auth.mjs'
+import { accountArg, withAccount, withoutAccountArg } from '../bridge/accounts.mjs'
+
+const ACCOUNT = accountArg()
 
 const CLIENT_COPY = join(SECRETS_DIR, 'youtube-client.json')
 
 function findClientFile() {
-  const arg = process.argv.slice(2).find((a) => !a.startsWith('-'))
+  const arg = withoutAccountArg().slice(2).find((a) => !a.startsWith('-'))
   for (const p of [arg, process.env.YOUTUBE_CLIENT_SECRET_FILE, CLIENT_COPY]) {
     if (p && existsSync(resolve(p))) return resolve(p)
   }
@@ -71,7 +78,8 @@ server.listen(0, '127.0.0.1', () => {
     response_type: 'code',
     scope: SCOPES.join(' '),
     access_type: 'offline',
-    prompt: 'consent',
+    // Ask which Google account and channel every time, so a second channel is easy to pick.
+    prompt: 'select_account consent',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     state,
@@ -113,14 +121,15 @@ server.listen(0, '127.0.0.1', () => {
       })
       const tok = await r.json()
       if (!r.ok || !tok.refresh_token) throw new Error(tok.error_description ?? tok.error ?? 'no refresh token')
-      saveToken({
+      withAccount(ACCOUNT, () => saveToken({
         client_id: client.client_id,
         client_secret: client.client_secret,
         refresh_token: tok.refresh_token,
         access_token: tok.access_token,
         expires_at: Date.now() + (tok.expires_in ?? 3600) * 1000,
         scope: tok.scope,
-      })
+      }))
+      if (ACCOUNT) console.log(`  Saved as the "${ACCOUNT}" YouTube account.`)
       // Say which channel we got, so a wrong-account sign-in is obvious now.
       const ch = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true', {
         headers: { authorization: `Bearer ${tok.access_token}` },

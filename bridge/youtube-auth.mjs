@@ -1,6 +1,6 @@
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { SECRETS_DIR, accountSecret, listAccounts } from './accounts.mjs'
 
 /**
  * YouTube credentials, kept out of the agent's reach.
@@ -9,10 +9,13 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
  * directory: the agent's file tools refuse it even if JARVIS_FILE_ROOTS is
  * widened to the whole home folder. Only this bridge process reads it.
  *
- * Written once by `npm run youtube:connect`, refreshed here as needed.
+ * Written once by `npm run youtube:connect`, refreshed here as needed. Extra
+ * channels (`--account <name>`) live beside it as youtube@<name>.json; the
+ * current account comes from accounts.mjs.
  */
-export const SECRETS_DIR = join(homedir(), '.jarvis', 'secrets')
+export { SECRETS_DIR }
 export const TOKEN_FILE = join(SECRETS_DIR, 'youtube.json')
+const tokenFile = () => join(SECRETS_DIR, `${accountSecret('youtube')}.json`)
 
 export const SCOPES = [
   // Read + manage the channel: videos, playlists, comments, thumbnails.
@@ -22,40 +25,45 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/yt-analytics.readonly',
 ]
 
+/** True when any YouTube channel (main or named) is connected. */
 export function youtubeConnected() {
-  return existsSync(TOKEN_FILE)
+  return existsSync(TOKEN_FILE) || listAccounts('youtube').length > 0
 }
 
 export function readToken() {
   try {
-    return JSON.parse(readFileSync(TOKEN_FILE, 'utf8'))
+    return JSON.parse(readFileSync(tokenFile(), 'utf8'))
   } catch {
     return null
   }
 }
 
 export function saveToken(token) {
+  const file = tokenFile()
   mkdirSync(SECRETS_DIR, { recursive: true })
-  writeFileSync(TOKEN_FILE, JSON.stringify(token, null, 2), { mode: 0o600 })
+  writeFileSync(file, JSON.stringify(token, null, 2), { mode: 0o600 })
   try {
-    chmodSync(TOKEN_FILE, 0o600)
+    chmodSync(file, 0o600)
   } catch {
     /* Windows: ACLs, not modes */
   }
 }
 
-let refreshing = null
+/** One refresh in flight per account. */
+const refreshing = new Map()
 
 /** A valid access token, refreshing it first when it is within a minute of expiry. */
 export async function accessToken() {
   const tok = readToken()
+  const file = tokenFile()
   if (!tok?.refresh_token) {
-    throw new Error('YouTube is not connected. The user needs to run: npm run youtube:connect')
+    throw new Error(`YouTube ${accountSecret('youtube')} is not connected. The user needs to run: npm run youtube:connect`)
   }
   if (tok.access_token && tok.expires_at && Date.now() < tok.expires_at - 60_000) {
     return tok.access_token
   }
-  refreshing ??= (async () => {
+  if (refreshing.has(file)) return refreshing.get(file)
+  const p = (async () => {
     const res = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -80,8 +88,7 @@ export async function accessToken() {
     }
     saveToken(next)
     return next.access_token
-  })().finally(() => {
-    refreshing = null
-  })
-  return refreshing
+  })().finally(() => refreshing.delete(file))
+  refreshing.set(file, p)
+  return p
 }

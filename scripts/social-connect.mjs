@@ -1,8 +1,12 @@
 /**
- * Connect JARVIS to TikTok or Instagram — run once per platform:
+ * Connect JARVIS to TikTok, Instagram or a Facebook Page — run once per platform:
  *
  *   npm run social:connect -- tiktok
  *   npm run social:connect -- instagram
+ *   npm run social:connect -- facebook
+ *
+ * More channels: add `--account <name>` (e.g. `-- tiktok --account cooking`)
+ * to save another account beside the main one.
  *
  * Asks for your developer app's key, secret and redirect URI the first time
  * (see SOCIAL.md), opens the platform's consent screen, and saves the tokens
@@ -22,17 +26,26 @@ import { createInterface } from 'node:readline/promises'
 import { readSecret, saveSecret } from '../bridge/secrets.mjs'
 import { TIKTOK_SCOPES } from '../bridge/tiktok.mjs'
 import { IG_SCOPES } from '../bridge/instagram.mjs'
+import { FB_SCOPES } from '../bridge/facebook.mjs'
+import { accountArg, accountSecret, withoutAccountArg } from '../bridge/accounts.mjs'
 
-const platform = (process.argv[2] ?? '').toLowerCase()
-if (!['tiktok', 'instagram'].includes(platform)) {
-  console.error('\n  Usage: npm run social:connect -- tiktok   (or instagram)\n')
+const ACCOUNT = accountArg()
+const platform = (withoutAccountArg()[2] ?? '').toLowerCase()
+const tokenName = () => accountSecret(platform, ACCOUNT)
+if (!['tiktok', 'instagram', 'facebook'].includes(platform)) {
+  console.error('\n  Usage: npm run social:connect -- tiktok|instagram|facebook [--account <name>]\n')
   process.exit(1)
 }
 
 const rl = createInterface({ input: process.stdin, output: process.stdout })
 const ask = async (q, def) => ((await rl.question(`  ${q}${def ? ` [${def}]` : ''}: `)).trim() || def || '')
 
-const LABEL = platform === 'tiktok' ? { key: 'Client key', secret: 'Client secret' } : { key: 'Instagram app ID', secret: 'Instagram app secret' }
+const LABEL =
+  platform === 'tiktok'
+    ? { key: 'Client key', secret: 'Client secret' }
+    : platform === 'facebook'
+      ? { key: 'Meta app ID', secret: 'Meta app secret' }
+      : { key: 'Instagram app ID', secret: 'Instagram app secret' }
 
 let app = readSecret(`${platform}-app`)
 if (!app || process.argv.includes('--reset')) {
@@ -49,6 +62,7 @@ if (!app || process.argv.includes('--reset')) {
   saveSecret(`${platform}-app`, app)
 }
 
+const FB_VER = process.env.FB_GRAPH_VERSION ?? 'v24.0'
 const state = randomBytes(16).toString('hex')
 const auth =
   platform === 'tiktok'
@@ -59,7 +73,15 @@ const auth =
         redirect_uri: app.redirect_uri,
         state,
       })}`
-    : `https://www.instagram.com/oauth/authorize?${new URLSearchParams({
+    : platform === 'facebook'
+      ? `https://www.facebook.com/${FB_VER}/dialog/oauth?${new URLSearchParams({
+          client_id: app.client_id,
+          redirect_uri: app.redirect_uri,
+          response_type: 'code',
+          scope: FB_SCOPES,
+          state,
+        })}`
+      : `https://www.instagram.com/oauth/authorize?${new URLSearchParams({
         client_id: app.client_id,
         redirect_uri: app.redirect_uri,
         response_type: 'code',
@@ -75,7 +97,9 @@ openBrowser(auth)
 const code = await getCode()
 try {
   if (platform === 'tiktok') await finishTikTok(code)
+  else if (platform === 'facebook') await finishFacebook(code)
   else await finishInstagram(code)
+  if (ACCOUNT) console.log(`  Saved as the "${ACCOUNT}" ${platform} account.`)
   console.log('  Restart the bridge (npm start -- --writes) and JARVIS has it.\n')
   process.exit(0)
 } catch (err) {
@@ -129,7 +153,7 @@ async function finishTikTok(code) {
   })
   const b = await res.json()
   if (!res.ok || !b.access_token) throw new Error(b.error_description ?? b.error ?? `status ${res.status}`)
-  saveSecret('tiktok', {
+  saveSecret(tokenName(), {
     client_key: app.client_id,
     client_secret: app.client_secret,
     open_id: b.open_id,
@@ -171,7 +195,7 @@ async function finishInstagram(code) {
   const me = await fetch(
     `https://graph.instagram.com/me?fields=user_id,username,account_type,followers_count&access_token=${encodeURIComponent(long.access_token)}`,
   ).then((x) => x.json())
-  saveSecret('instagram', {
+  saveSecret(tokenName(), {
     user_id: me.user_id ?? String(short.user_id),
     username: me.username,
     access_token: long.access_token,
@@ -181,6 +205,36 @@ async function finishInstagram(code) {
   if (me.account_type && !['BUSINESS', 'MEDIA_CREATOR', 'CREATOR'].includes(me.account_type)) {
     console.log('  Note: switch the account to Professional (Creator or Business) in the Instagram app, or publishing will be refused.')
   }
+}
+
+async function finishFacebook(code) {
+  const g = (path, params) => fetch(`https://graph.facebook.com/${FB_VER}${path}?${new URLSearchParams(params)}`).then((x) => x.json())
+  const short = await g('/oauth/access_token', { client_id: app.client_id, client_secret: app.client_secret, redirect_uri: app.redirect_uri, code })
+  if (!short.access_token) throw new Error(short.error?.message ?? JSON.stringify(short))
+  // A Page token taken from a long-lived user token does not expire.
+  const long = await g('/oauth/access_token', {
+    grant_type: 'fb_exchange_token',
+    client_id: app.client_id,
+    client_secret: app.client_secret,
+    fb_exchange_token: short.access_token,
+  })
+  if (!long.access_token) throw new Error(long.error?.message ?? 'could not get a long-lived token')
+  const pages = (await g('/me/accounts', { fields: 'id,name,access_token,tasks', access_token: long.access_token })).data ?? []
+  const usable = pages.filter((p) => !p.tasks || p.tasks.includes('CREATE_CONTENT'))
+  if (!usable.length) {
+    throw new Error('No Facebook Page you can post to was shared with the app. Make a Page (facebook.com/pages/create), then run this again and tick it.')
+  }
+  let pick = usable[0]
+  if (usable.length > 1) {
+    const rl2 = createInterface({ input: process.stdin, output: process.stdout })
+    console.log('\n  Which Page is this channel?')
+    usable.forEach((p, i) => console.log(`    ${i + 1}. ${p.name}`))
+    const n = Number((await rl2.question('  Number: ')).trim())
+    rl2.close()
+    pick = usable[n - 1] ?? usable[0]
+  }
+  saveSecret(tokenName(), { page_id: pick.id, page_name: pick.name, access_token: pick.access_token, connected: new Date().toISOString() })
+  console.log(`\n  Connected to the Facebook Page: ${pick.name}`)
 }
 
 function openBrowser(url) {

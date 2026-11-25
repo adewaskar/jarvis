@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { z } from 'zod'
 import { hasSecret, readSecret, safe, saveSecret } from './secrets.mjs'
+import { accountSecret, listAccounts } from './accounts.mjs'
 
 /**
  * Instagram, through the official Instagram API with Instagram Login.
@@ -18,12 +19,13 @@ const GRAPH = `https://graph.instagram.com/${VER}`
 export const IG_SCOPES =
   'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments,instagram_business_manage_insights'
 
-export const instagramConnected = () => hasSecret('instagram')
+export const instagramConnected = () => hasSecret('instagram') || listAccounts('instagram').length > 0
 
 /** Long-lived tokens last 60 days; refresh when under a week is left. */
 async function token() {
-  const t = readSecret('instagram')
-  if (!t?.access_token) throw new Error('Instagram is not connected. The user needs to run: npm run social:connect -- instagram')
+  const name = accountSecret('instagram')
+  const t = readSecret(name)
+  if (!t?.access_token) throw new Error(`Instagram ${name} is not connected. The user needs to run: npm run social:connect -- instagram`)
   if (Date.now() > t.expires_at) {
     throw new Error('Instagram sign-in expired. Run: npm run social:connect -- instagram')
   }
@@ -31,7 +33,7 @@ async function token() {
     const r = await fetch(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(t.access_token)}`)
     const b = await r.json().catch(() => ({}))
     if (r.ok && b.access_token) {
-      saveSecret('instagram', { ...t, access_token: b.access_token, expires_at: Date.now() + b.expires_in * 1000 })
+      saveSecret(name, { ...t, access_token: b.access_token, expires_at: Date.now() + b.expires_in * 1000 })
       return b.access_token
     }
   }
@@ -52,7 +54,7 @@ async function ig(path, { method = 'GET', params = {} } = {}) {
   return data
 }
 
-const igUserId = () => readSecret('instagram')?.user_id ?? 'me'
+const igUserId = () => readSecret(accountSecret('instagram'))?.user_id ?? 'me'
 
 export async function instagramProfile() {
   return ig('/me', {

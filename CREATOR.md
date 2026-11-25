@@ -60,6 +60,22 @@ video, and queues it. A publisher posts the queue automatically.
 The autopilot only works while JARVIS is running. Leave `npm start -- --writes`
 open, and keep the PC awake.
 
+### Several channels
+
+Up to 5 channels, each with its own niche, times, platforms (YouTube, TikTok,
+Instagram, Facebook), cap and accounts. Say: *"Add a channel called space:
+space facts for kids, post at 4pm on YouTube and TikTok."*
+
+- Each channel posts with the accounts connected under its name
+  (`--account space`, see SOCIAL.md). You create the accounts; JARVIS can't.
+- New channels start at **1 post per platform per day**. Raise it once the
+  channel is settled.
+- Two channels can't share a niche. Platforms refuse to pay near-identical,
+  mass-produced channels, so give each one its own audience.
+- YouTube's free API quota allows about **6 uploads a day across all
+  channels**. The autopilot holds the rest for the next day
+  (`JARVIS_YOUTUBE_DAILY_UPLOADS` changes the number if Google raises your quota).
+
 ## Pipelines
 
 Two boards, matching the stages you gave:
@@ -226,8 +242,8 @@ Add the pieces to `JARVIS_DISABLE`, separated by commas:
 $env:JARVIS_DISABLE = "crypto,autopilot"
 ```
 
-The names are `youtube`, `tiktok`, `instagram`, `studio`, `crypto`, `autopilot`,
-`pipelines` and `system` (laptop control).
+The names are `youtube`, `tiktok`, `instagram`, `facebook`, `studio`, `crypto`,
+`autopilot`, `pipelines`, `agency` and `system` (laptop control).
 
 ## Being realistic about earnings
 

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { SECRETS_DIR } from './youtube-auth.mjs'
+import { SECRETS_DIR } from './accounts.mjs'
 
 /**
  * Per-platform credentials in ~/.jarvis/secrets/<name>.json.

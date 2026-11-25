@@ -123,7 +123,11 @@ export function createDeck({ workspace, pipelines, on, model, effort, writes, br
       nextScout = readFileSync(join(workspace, 'memory', 'core.md'), 'utf8').match(/Next GitHub check due:\s*(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
     } catch {}
     return [
-      { name: 'YouTube Autopilot', state: auto.enabled ? 'on' : 'off', detail: auto.enabled ? `Shorts at ${(auto.times ?? []).join(' & ')}` : 'switched off' },
+      {
+        name: 'Video Autopilot',
+        state: auto.enabled ? 'on' : 'off',
+        detail: !auto.enabled ? 'switched off' : auto.channels?.length ? `${auto.channels.filter((c) => c.enabled !== false).length} channels` : `Shorts at ${(auto.times ?? []).join(' & ')}`,
+      },
       { name: 'Studio', state: 'on', detail: 'images · Kokoro voice · renders' },
       { name: 'Research', state: 'on', detail: 'web search & browser' },
       { name: 'Security Watch', state: 'on', detail: 'daily read-only check' },
@@ -155,7 +159,8 @@ export function createDeck({ workspace, pipelines, on, model, effort, writes, br
         enabled: Boolean(settings.enabled),
         niche: settings.niche ?? null,
         times: settings.times ?? [],
-        queued: queue.filter((q) => !q.done).length,
+        channels: (settings.channels ?? []).map((c) => ({ id: c.id, niche: c.niche, enabled: c.enabled !== false })),
+        queued: queue.filter((q) => q.status !== 'done' && q.status !== 'cancelled').length,
         recent,
       },
       crypto: coins ?? [],

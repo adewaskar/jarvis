@@ -25,6 +25,9 @@ import { youtubeServer, youtubeUpload } from './youtube.mjs'
 import { youtubeConnected } from './youtube-auth.mjs'
 import { tiktokConnected, tiktokPublish, tiktokServer } from './tiktok.mjs'
 import { instagramConnected, instagramPublishReel, instagramServer } from './instagram.mjs'
+import { facebookConnected, facebookPublishReel, makeFacebookServer } from './facebook.mjs'
+import { accountSecret, listAccounts } from './accounts.mjs'
+import { hasSecret } from './secrets.mjs'
 import { ffmpegAvailable, studioServer } from './studio.mjs'
 import { configuredWallets, cryptoServer } from './crypto.mjs'
 import { createAutopilot } from './autopilot.mjs'
@@ -483,8 +486,8 @@ const PROMPT_EYES = `Your eyes:
 
 `
 const PROMPT_CREATOR = `The creator suite — their channels, studio and money:
-- YouTube (jarvis_youtube), TikTok (jarvis_tiktok) and Instagram
-  (jarvis_instagram) are the user's OWN accounts, signed in. "My channel", "my
+- YouTube (jarvis_youtube), TikTok (jarvis_tiktok), Instagram
+  (jarvis_instagram) and Facebook (jarvis_facebook) are the user's OWN accounts, signed in. "My channel", "my
   followers", "how did my last video do" mean these tools, not a web search.
   Only connected ones are present; if one is missing, say once it needs connecting.
 - Put numbers on a blade — stats, a chart of views by day, top videos — and say
@@ -503,7 +506,11 @@ const PROMPT_CREATOR = `The creator suite — their channels, studio and money:
 - The agency loop (jarvis_agency) works the Agency leads board every few hours
   on its own: get_agency_settings, update_agency_settings, launch_agency_run.
   call_owner rings the user's phone when they ask for a call.
-- The autopilot (jarvis_autopilot) makes and posts videos on a schedule.
+- The autopilot (jarvis_autopilot) makes and posts videos on a schedule, for up
+  to 5 channels (update_autopilot_channel), each with its own niche and accounts.
+  You cannot create social accounts or channels yourself: the user makes them and
+  connects each with "npm run youtube:connect -- --account <channel>" or
+  "npm run social:connect -- <platform> --account <channel>".
   Products, affiliate links and brand deals live there too.
 - Crypto (jarvis_crypto): prices, their watch-only wallets, payment links and QR
   codes to their OWN addresses, NFT packages. You hold no keys and can never
@@ -536,11 +543,12 @@ const PROMPT_TOOLS = `Using tools:
 /**
  * The creator suite. Each platform joins once its connect script has saved a
  * token; any piece can be left out with JARVIS_DISABLE (youtube, tiktok,
- * instagram, studio, crypto, autopilot).
+ * instagram, facebook, studio, crypto, autopilot).
  */
 const YOUTUBE_ON = !DISABLED.has('youtube') && youtubeConnected()
 const TIKTOK_ON = !DISABLED.has('tiktok') && tiktokConnected()
 const INSTAGRAM_ON = !DISABLED.has('instagram') && instagramConnected()
+const FACEBOOK_ON = !DISABLED.has('facebook') && facebookConnected()
 const STUDIO_ON = !DISABLED.has('studio')
 const CRYPTO_ON = !DISABLED.has('crypto')
 const AUTOPILOT_ON = !DISABLED.has('autopilot')
@@ -573,7 +581,13 @@ const PUBLISHERS = {
   ...(INSTAGRAM_ON
     ? { instagram: (it) => instagramPublishReel(it.video, { caption: it.captions?.instagram ?? it.caption ?? it.title }) }
     : {}),
+  ...(FACEBOOK_ON
+    ? { facebook: (it) => facebookPublishReel(it.video, { description: it.captions?.facebook ?? it.caption ?? it.title, title: it.title }) }
+    : {}),
 }
+
+/** Whether a channel's account on a platform has been connected (main = null). */
+const accountConnected = (platform, account) => hasSecret(accountSecret(platform, account))
 
 const autopilot = AUTOPILOT_ON
   ? createAutopilot({
@@ -581,6 +595,7 @@ const autopilot = AUTOPILOT_ON
       allowWrites: ALLOW_WRITES,
       checkPath: checkToolPath,
       publishers: PUBLISHERS,
+      isConnected: accountConnected,
       runAgent: (prompt) => runAgent(prompt),
     })
   : null
@@ -624,6 +639,7 @@ function creatorServers({ live = true, show = null } = {}) {
     ...(YOUTUBE_ON ? { jarvis_youtube: youtubeServer(opts) } : {}),
     ...(TIKTOK_ON ? { jarvis_tiktok: tiktokServer(opts) } : {}),
     ...(INSTAGRAM_ON ? { jarvis_instagram: instagramServer(opts) } : {}),
+    ...(FACEBOOK_ON ? { jarvis_facebook: makeFacebookServer() } : {}),
     ...(STUDIO_ON
       ? {
           jarvis_studio: studioServer({
@@ -1474,8 +1490,13 @@ console.log(
   console.log(
     `[jarvis] creator: youtube ${st(YOUTUBE_ON, 'youtube', 'npm run youtube:connect')}` +
       ` · tiktok ${st(TIKTOK_ON, 'tiktok', 'npm run social:connect -- tiktok')}` +
-      ` · instagram ${st(INSTAGRAM_ON, 'instagram', 'npm run social:connect -- instagram')}`,
+      ` · instagram ${st(INSTAGRAM_ON, 'instagram', 'npm run social:connect -- instagram')}` +
+      ` · facebook ${st(FACEBOOK_ON, 'facebook', 'npm run social:connect -- facebook')}`,
   )
+  const extra = ['youtube', 'tiktok', 'instagram', 'facebook']
+    .map((p) => [p, listAccounts(p).filter((a) => a !== 'main')])
+    .filter(([, a]) => a.length)
+  if (extra.length) console.log(`[jarvis] extra channel accounts: ${extra.map(([p, a]) => `${p} ${a.join(', ')}`).join(' · ')}`)
   const wallets = Object.keys(configuredWallets())
   console.log(
     `[jarvis] crypto ${CRYPTO_ON ? (wallets.length ? `watching ${wallets.join(', ')}` : 'prices only (set JARVIS_WALLETS for balances and payments)') : 'disabled'}`,
