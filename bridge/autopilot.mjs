@@ -1,5 +1,5 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
@@ -248,12 +248,21 @@ export function createAutopilot({ workspace, allowWrites, checkPath, publishers,
   /** One unattended video run for a channel. Callers check `creating` first. */
   async function runChannel(c, name) {
     creating = true
-    console.log(`[autopilot] creating the ${name} video`)
+    // runs.log: the console window is gone after a restart, this file is not.
+    const log = (line) => {
+      console.log(`[autopilot] ${line}`)
+      try {
+        appendFileSync(join(workspace, 'autopilot', 'runs.log'), `${new Date().toISOString()} ${line}\n`)
+      } catch {
+        /* logging must never stop a run */
+      }
+    }
+    log(`creating the ${name} video`)
     try {
       const out = await runAgent(brief(c))
-      console.log(`[autopilot] ${name} run finished: ${String(out).slice(0, 200)}`)
+      log(`${name} run finished: ${String(out).replace(/s+/g, ' ').slice(0, 400)}`)
     } catch (e) {
-      console.warn(`[autopilot] ${name} run failed: ${e.message}`)
+      log(`${name} run failed: ${e?.stack ?? e}`)
     } finally {
       creating = false
     }

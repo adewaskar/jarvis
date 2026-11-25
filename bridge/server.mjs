@@ -40,7 +40,7 @@ import { createDeck } from './deck.mjs'
 import { createBrain } from './brain.mjs'
 import { createAgency } from './agency.mjs'
 import { homedir, tmpdir } from 'node:os'
-import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
@@ -304,6 +304,21 @@ const decideTool = (name) => decidePolicy(name, ALLOW_WRITES)
 const WORKSPACE = resolvePath(
   process.env.JARVIS_WORKSPACE ?? join(homedir(), '.jarvis', 'workspace'),
 )
+
+// A crash used to leave no trace once start-jarvis restarted the bridge. Record
+// it in the workspace, then exit as before so the restart loop brings it back.
+const recordCrash = (kind) => (err) => {
+  try {
+    mkdirSync(WORKSPACE, { recursive: true })
+    appendFileSync(join(WORKSPACE, 'crash.log'), `${new Date().toISOString()} ${kind}: ${err?.stack ?? err}\n`)
+  } catch {
+    /* nothing more we can do */
+  }
+  console.error(`[bridge] ${kind}:`, err)
+  process.exit(1)
+}
+process.on('uncaughtException', recordCrash('uncaughtException'))
+process.on('unhandledRejection', recordCrash('unhandledRejection'))
 mkdirSync(WORKSPACE, { recursive: true })
 
 const TOOL_ROOTS = fileRoots({
