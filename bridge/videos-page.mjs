@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 
 /**
  * GET /videos: every finished video JARVIS has made, newest first, playable in
@@ -35,6 +37,9 @@ export async function listVideos(workspace) {
         title: q?.title ?? name.replace(/\.mp4$/i, '').replace(/^\d[\d-]*-/, '').replace(/[-_]/g, ' '),
         made: st.mtime.toISOString(),
         mb: +(st.size / 1e6).toFixed(1),
+        queueId: q?.id ?? null,
+        channel: q?.channel ?? null,
+        caption: q?.caption ?? q?.description ?? null,
         status: q ? (q.status === 'review' ? 'waiting for your OK' : posted.length ? 'posted' : q.status) : 'not queued',
         posted,
       })
@@ -84,4 +89,35 @@ ${videos.length ? `<main>${cards}</main>` : '<p class="empty">No videos yet. Ask
 document.addEventListener('play', (e) => { for (const v of document.querySelectorAll('video')) if (v !== e.target) v.pause() }, true)
 </script>
 </body></html>`
+}
+
+/**
+ * "Pop it out": put a finished video on the owner's screen (a video blade that
+ * plays at once). Live sessions only, since only they have a screen.
+ */
+export function videosServer({ workspace, show }) {
+  return createSdkMcpServer({
+    name: 'jarvis_videos',
+    version: '1.0.0',
+    alwaysLoad: true,
+    tools: [
+      tool(
+        'show_video',
+        'Open a finished video on the screen and play it, when the owner says "pop it out", "show me", "pull up" or "let me watch". which: "waiting" (newest video waiting for their OK, the default), "latest" (newest video made) or "path" (give path). Returns what it is, its status and queueId, so you can explain it and, if they say yes, approve it with approve_scheduled_post.',
+        { which: z.enum(['waiting', 'latest', 'path']).optional(), path: z.string().optional() },
+        async ({ which = 'waiting', path }) => {
+          const all = await listVideos(workspace)
+          const v =
+            which === 'path' ? all.find((x) => x.path === path) : which === 'latest' ? all[0] : (all.find((x) => x.status === 'waiting for your OK') ?? null)
+          if (!v) {
+            const text = which === 'waiting' ? 'No video is waiting for the owner right now.' + (all[0] ? ' The newest one is ' + all[0].title + ' (' + all[0].status + ').' : '') : 'No such video.'
+            return { content: [{ type: 'text', text }], isError: which === 'path' }
+          }
+          show({ path: v.path, title: v.title })
+          const { path: p, title, status, queueId, channel, caption, mb, made } = v
+          return { content: [{ type: 'text', text: JSON.stringify({ shown: true, title, status, queueId, channel, caption, mb, made, path: p }) }] }
+        },
+      ),
+    ],
+  })
 }

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { z } from 'zod'
 import { safe } from './secrets.mjs'
 
@@ -88,18 +89,47 @@ function wordsToSrt(words, perLine = 3) {
  */
 const KOKORO_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX'
 export const KOKORO_DEFAULT_VOICE = process.env.JARVIS_KOKORO_VOICE || 'bm_george'
-let kokoroLoading = null
-export function kokoro() {
-  kokoroLoading ??= (async () => {
-    const { env } = await import('@huggingface/transformers')
-    env.cacheDir = join(homedir(), '.jarvis', 'models', 'hf')
-    const { KokoroTTS } = await import('kokoro-js')
-    return KokoroTTS.from_pretrained(KOKORO_MODEL, { dtype: 'q8', device: 'cpu' })
-  })().catch((e) => {
-    kokoroLoading = null
-    throw new Error(`The Kokoro voice failed to load: ${e.message}`)
-  })
-  return kokoroLoading
+/**
+ * Kokoro on a worker thread (kokoro-worker.mjs), so a long film never freezes
+ * the bridge. Returns an object with KokoroTTS's generate(text, { voice, speed })
+ * resolving to { audio: Float32Array, sampling_rate }. The worker is shared and
+ * unref'd: it never keeps the process alive on its own.
+ */
+let kokoroWorker = null
+export async function kokoro() {
+  if (!kokoroWorker) {
+    const worker = new Worker(new URL('./kokoro-worker.mjs', import.meta.url), {
+      workerData: { cacheDir: join(homedir(), '.jarvis', 'models', 'hf'), model: KOKORO_MODEL },
+    })
+    worker.unref()
+    const pending = new Map()
+    let next = 0
+    const failAll = (msg) => {
+      for (const { reject } of pending.values()) reject(new Error(msg))
+      pending.clear()
+      kokoroWorker = null
+    }
+    worker.on('message', ({ id, error, audio, sampling_rate }) => {
+      const p = pending.get(id)
+      if (!p) return
+      pending.delete(id)
+      if (pending.size === 0) worker.unref()
+      if (error) p.reject(new Error(`Kokoro: ${error}`))
+      else p.resolve({ audio, sampling_rate })
+    })
+    worker.on('error', (e) => failAll(`The Kokoro voice failed: ${e.message}`))
+    worker.on('exit', (code) => failAll(`The Kokoro voice stopped (exit ${code}).`))
+    kokoroWorker = {
+      generate: (text, { voice, speed } = {}) =>
+        new Promise((resolve, reject) => {
+          const id = next++
+          pending.set(id, { resolve, reject })
+          worker.ref()
+          worker.postMessage({ id, text, voice, speed })
+        }),
+    }
+  }
+  return kokoroWorker
 }
 
 /** First and last sample louder than the noise floor, so word timings skip the silence Kokoro pads with. */

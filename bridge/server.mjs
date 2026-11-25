@@ -30,7 +30,7 @@ import { accountSecret, listAccounts } from './accounts.mjs'
 import { hasSecret } from './secrets.mjs'
 import { ffmpegAvailable, probe as probeVideo, studioServer } from './studio.mjs'
 import { filmsInstalled, filmsServer } from './films.mjs'
-import { listVideos, renderVideosPage } from './videos-page.mjs'
+import { listVideos, renderVideosPage, videosServer } from './videos-page.mjs'
 import { toast } from './phone.mjs'
 import { configuredWallets, cryptoServer } from './crypto.mjs'
 import { createAutopilot } from './autopilot.mjs'
@@ -690,6 +690,7 @@ function creatorServers({ live = true, show = null } = {}) {
         }
       : {}),
     ...(STUDIO_ON && filmsInstalled() ? { jarvis_films: filmsServer({ ...opts, workspace: WORKSPACE, onRendered: show }) } : {}),
+    ...(live && show ? { jarvis_videos: videosServer({ workspace: WORKSPACE, show }) } : {}),
     ...(CRYPTO_ON ? { jarvis_crypto: cryptoServer({ ...opts, workspace: WORKSPACE }) } : {}),
     ...(autopilot ? { jarvis_autopilot: autopilot.makeServer({ live }) } : {}),
     // Unattended runs get only the paperwork tool: an agency run must not start another or ring the phone itself.

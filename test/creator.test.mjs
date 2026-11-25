@@ -367,6 +367,27 @@ test('the videos page lists finished videos only, escaped', async () => {
   assert.doesNotMatch(html, /silent\.mp4/)
 })
 
+test('"pop it out" shows the video waiting for review, and nothing when none is', async () => {
+  const { videosServer } = await import('../bridge/videos-page.mjs')
+  const { mkdirSync } = await import('node:fs')
+  const ws = mkdtempSync(join(tmpdir(), 'jarvis-pop-'))
+  const shown = []
+  const server = videosServer({ workspace: ws, show: (v) => shown.push(v) })
+  const t = (server.instance._registeredTools ?? server.instance._tools).show_video
+  const none = await (t.handler ?? t.callback)({}, {})
+  assert.match(none.content[0].text, /No video is waiting/)
+  assert.equal(shown.length, 0)
+  const d = join(ws, 'studio', '20261125110000-lighthouse')
+  mkdirSync(d, { recursive: true })
+  writeFileSync(join(d, 'lighthouse.mp4'), 'x')
+  mkdirSync(join(ws, 'autopilot'), { recursive: true })
+  writeFileSync(join(ws, 'autopilot', 'queue.json'), JSON.stringify([{ id: 'q1', video: join(d, 'lighthouse.mp4'), title: 'The Lighthouse', status: 'review' }]))
+  const res = await call(server, 'show_video', {})
+  assert.equal(res.data.queueId, 'q1')
+  assert.equal(res.data.status, 'waiting for your OK')
+  assert.deepEqual(shown, [{ path: join(d, 'lighthouse.mp4'), title: 'The Lighthouse' }])
+})
+
 test('agency: booking link goes in the pitch and back to anyone who asks to meet', async () => {
   const ws = mkdtempSync(join(tmpdir(), 'jarvis-book-'))
   const pipelines = createPipelines({ workspace: ws })
