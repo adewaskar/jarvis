@@ -239,6 +239,51 @@ export function studioServer({ allowWrites, checkPath, workspace, elevenKey, onR
     return out
   }
 
+  /**
+   * A website hero background: silent, looping, small. Each picture gets a slow
+   * zoom, pictures cross-fade, and a poster frame is saved for slow connections
+   * and reduced-motion visitors.
+   */
+  async function heroVideo({ images, outDir, name = 'hero', seconds = 4, fade = 0.8, vertical = false }) {
+    const [w, h] = vertical ? [720, 1280] : [1920, 1080]
+    const tmp = await jobDir(`${name}-hero`)
+    const clips = []
+    for (const [i, img] of images.entries()) {
+      const out = join(tmp, `clip-${String(i).padStart(2, '0')}.mp4`)
+      const frames = Math.ceil(seconds * FPS)
+      const z = i % 2 === 0 ? `min(1+0.08*on/${frames},1.08)` : `max(1.08-0.08*on/${frames},1)`
+      await run(FFMPEG, [
+        '-y', '-loop', '1', '-i', img, '-t', String(seconds),
+        '-vf', `scale=${w * 2}:${h * 2}:force_original_aspect_ratio=increase,crop=${w * 2}:${h * 2},zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS},format=yuv420p`,
+        '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', out,
+      ])
+      clips.push(out)
+    }
+    const file = join(outDir, `${name}${vertical ? '-mobile' : ''}.mp4`)
+    const args = ['-y']
+    for (const c of clips) args.push('-i', c)
+    if (clips.length === 1) {
+      args.push('-map', '0:v')
+    } else {
+      // Offset of the k-th cross-fade: the length of everything before it, minus the overlaps so far.
+      const chain = []
+      let prev = '[0:v]'
+      for (let k = 1; k < clips.length; k++) {
+        const label = k === clips.length - 1 ? '[v]' : `[x${k}]`
+        chain.push(`${prev}[${k}:v]xfade=transition=fade:duration=${fade}:offset=${(k * seconds - k * fade).toFixed(2)}${label}`)
+        prev = label
+      }
+      args.push('-filter_complex', chain.join(';'), '-map', '[v]')
+    }
+    // Small enough for a landing page: no audio, CRF 28, streamable.
+    args.push('-an', '-c:v', 'libx264', '-preset', 'slow', '-crf', vertical ? '30' : '28', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', file)
+    await run(FFMPEG, args)
+    const poster = join(outDir, `${name}${vertical ? '-mobile' : ''}-poster.jpg`)
+    await run(FFMPEG, ['-y', '-v', 'error', '-ss', '0.5', '-i', file, '-frames:v', '1', '-q:v', '4', poster])
+    const info = await probe(file)
+    return { video: file, poster, seconds: +info.duration.toFixed(1), sizeMB: info.sizeMB }
+  }
+
   const reads = [
     tool(
       'get_media_info',
@@ -417,6 +462,42 @@ seconds share its length. Output is ready for TikTok, Reels and Shorts.`,
         await finish({ dir, video: join(dir, 'silent.mp4'), voice: vo, music, musicVolume, captionsFile, out })
         onRendered?.({ path: out, title })
         return { video: out, shownOnScreen: Boolean(onRendered), ...(await probe(out)) }
+      }),
+    ),
+    tool(
+      'render_hero_video',
+      `Make a website hero background video from 3-6 pictures: silent, looping, slow zoom with
+cross-fades, 1920x1080 plus a 720x1280 mobile cut, each with a poster image, compressed for the web
+(usually 1-4 MB). Saves into outDir (e.g. the demo site's folder) and returns the files and an HTML
+snippet to paste into the hero section.`,
+      {
+        images: z.array(z.string()).min(1).max(8),
+        outDir: z.string().describe('Folder to save into, usually the site folder'),
+        name: z.string().regex(/^[a-z0-9-]{1,40}$/).optional().describe('File name stem, default "hero"'),
+        secondsPerImage: z.number().min(2).max(8).optional(),
+      },
+      safe(async ({ images, outDir, name = 'hero', secondsPerImage = 4 }) => {
+        for (const p of images) need(p)
+        need(outDir)
+        await mkdir(outDir, { recursive: true })
+        const wide = await heroVideo({ images, outDir, name, seconds: secondsPerImage })
+        const tall = await heroVideo({ images, outDir, name, seconds: secondsPerImage, vertical: true })
+        const rel = (p) => basename(p)
+        return {
+          desktop: wide,
+          mobile: tall,
+          snippet: `<video class="hero-video" autoplay muted loop playsinline preload="metadata" poster="${rel(wide.poster)}" aria-hidden="true">
+  <source src="${rel(tall.video)}" type="video/mp4" media="(max-width: 700px)">
+  <source src="${rel(wide.video)}" type="video/mp4">
+</video>
+<style>
+.hero{position:relative;overflow:hidden}
+.hero-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.35),rgba(0,0,0,.6));z-index:-1}
+@media (prefers-reduced-motion: reduce){.hero-video{display:none}.hero{background:url(${rel(wide.poster)}) center/cover}}
+</style>`,
+          note: 'Put the snippet first inside the hero <section class="hero">, with the headline and button above the overlay. Keep the headline readable over it.',
+        }
       }),
     ),
     tool(

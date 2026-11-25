@@ -249,7 +249,10 @@ Use stage "lost" for leads that went nowhere or ideas that are dropped.`,
     return false
   }
 
-  return { makeServer, handleHttp, summary }
+  /** One card by id (a copy), or null. */
+  const card = (id) => structuredClone(load().find((i) => i.id === id) ?? null)
+
+  return { makeServer, handleHttp, summary, card }
 }
 
 function pick(o = {}, keys) {

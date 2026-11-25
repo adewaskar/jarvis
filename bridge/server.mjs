@@ -660,8 +660,8 @@ function creatorServers({ live = true, show = null } = {}) {
       : {}),
     ...(CRYPTO_ON ? { jarvis_crypto: cryptoServer({ ...opts, workspace: WORKSPACE }) } : {}),
     ...(autopilot ? { jarvis_autopilot: autopilot.makeServer({ live }) } : {}),
-    // Live sessions only: an agency run must not start another or ring the phone itself.
-    ...(agency && live ? { jarvis_agency: agency.makeServer() } : {}),
+    // Unattended runs get only the paperwork tool: an agency run must not start another or ring the phone itself.
+    ...(agency ? { jarvis_agency: agency.makeServer({ live }) } : {}),
     // The laptop. Power tools (sleep, shutdown) only exist in live sessions.
     ...(SYSTEM_ON
       ? {

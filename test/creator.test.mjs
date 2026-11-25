@@ -8,6 +8,8 @@ import { createPipelines } from '../bridge/pipelines.mjs'
 import { createAutopilot, titleOverlap } from '../bridge/autopilot.mjs'
 import { accountArg, accountSecret, currentAccount, listAccounts, withAccount, withoutAccountArg } from '../bridge/accounts.mjs'
 import { systemServer } from '../bridge/system.mjs'
+import { createAgency } from '../bridge/agency.mjs'
+import { fillTemplate, mdToHtml } from '../bridge/client-docs.mjs'
 
 const READS = {
   jarvis_tiktok: ['get_tiktok_profile', 'list_tiktok_videos', 'get_tiktok_creator_settings', 'check_tiktok_progress'],
@@ -28,7 +30,7 @@ const WRITES = {
   jarvis_autopilot: ['update_autopilot_settings', 'update_autopilot_channel', 'approve_scheduled_post', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
   jarvis_pipelines: ['create_pipeline_card', 'update_pipeline_card', 'delete_pipeline_card'],
   jarvis_system: ['launch_app', 'launch_link', 'close_app', 'set_volume', 'lock_computer', 'sleep_computer', 'schedule_shutdown', 'cancel_shutdown'],
-  jarvis_agency: ['update_agency_settings', 'launch_agency_run', 'call_owner'],
+  jarvis_agency: ['update_agency_settings', 'launch_agency_run', 'call_owner', 'prepare_client_documents'],
 }
 
 test('creator reads run in read-only mode', () => {
@@ -228,4 +230,53 @@ test('new channels hold videos for review, refuse repeats and learn from feedbac
 test('title overlap spots rewordings, not unrelated topics', () => {
   assert.ok(titleOverlap('Why octopuses taste with their arms', 'Octopuses taste with arms!') >= 0.6)
   assert.ok(titleOverlap('Why octopuses taste with their arms', 'The fish that walks on land') < 0.2)
+})
+
+test('client paperwork: filled from settings, gaps flagged, after-signing only for won cards', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'jarvis-docs-'))
+  const pipelines = createPipelines({ workspace: ws })
+  const agency = createAgency({ workspace: ws, allowWrites: true, runAgent: async () => 'SUMMARY: ok', pipelines })
+  const live = agency.makeServer({ live: true })
+  const headless = agency.makeServer({ live: false })
+  const names = (srv) => Object.keys(srv.instance._registeredTools).sort()
+  assert.deepEqual(names(headless), ['get_agency_settings', 'prepare_client_documents'], 'unattended runs get only the paperwork')
+
+  await call(live, 'update_agency_settings', {
+    agencyName: 'North Star Web', senderName: 'Sam', senderEmail: 'hello@example.com', businessAddress: '1 Main St, Winnipeg MB',
+    governingLaw: 'the Province of Manitoba', paymentLink: 'https://pay.example.com/x', careFee: '$29 a month',
+  })
+  const facts = { contact: 'Maria, owner', address: '9 Elm St', email: 'maria@example.com', phone: '204 555 0100', package: 'Starter', packageDetails: 'one page', price: '$900', turnaround: '2 weeks', demoUrl: 'https://demo.example.com', domain: 'mariasbakery.ca' }
+  const before = (await call(live, 'prepare_client_documents', { company: "Maria's Bakery", stage: 'before', facts })).data
+  assert.equal(before.ready, true, JSON.stringify(before.missing))
+  const proposal = readFileSync(before.files.find((p) => p.endsWith('proposal-and-terms.md')), 'utf8')
+  assert.match(proposal, /\$900/)
+  assert.match(proposal, /50%/)
+  assert.doesNotMatch(proposal, /\{\{|MISSING/)
+
+  // A gap is written visibly and reported.
+  const gappy = (await call(live, 'prepare_client_documents', { company: 'Bob Plumbing', stage: 'before' })).data
+  assert.equal(gappy.ready, false)
+  assert.ok(gappy.missing['proposal-and-terms.md'].includes('PRICE'))
+
+  // After-signing papers need a card in "won".
+  const auto = pipelines.makeServer({ allowWrites: true, canApprove: true, by: 'user' })
+  const card = (await call(auto, 'create_pipeline_card', { board: 'agency', title: "Maria's Bakery" })).data.created
+  assert.match((await call(live, 'prepare_client_documents', { company: "Maria's Bakery", stage: 'after', cardId: card, facts })).data, /Move it to "won"/)
+  for (const st of ['scored', 'approved_lead', 'demo_ready', 'approved_to_send', 'contacted', 'replied', 'meeting', 'proposal', 'won'])
+    await call(auto, 'update_pipeline_card', { id: card, stage: st, note: 'test' })
+  const after = (await call(live, 'prepare_client_documents', { company: "Maria's Bakery", stage: 'after', cardId: card, facts })).data
+  assert.equal(after.ready, true, JSON.stringify(after.missing))
+  const base = (p) => p.split(/[\\/]/).pop()
+  assert.deepEqual(after.files.map(base).sort(), ['care-plan.md', 'launch-checklist.md', 'privacy.html', 'service-agreement.md', 'site-privacy-policy.md', 'site-terms.md', 'terms.html'])
+  const privacy = readFileSync(after.files.find((p) => p.endsWith('privacy.html')), 'utf8')
+  assert.match(privacy, /<h1>Privacy Policy<\/h1>/)
+  assert.match(privacy, /mariasbakery\.ca/)
+  assert.doesNotMatch(privacy, /<!--/)
+})
+
+test('templates and markdown helpers', () => {
+  assert.deepEqual(fillTemplate('Hi {{A}} {{B}}', { A: 'x' }), { text: 'Hi x [[MISSING: B]]', missing: ['B'] })
+  const html = mdToHtml(['# T', '', 'A **b** <i> [p](privacy.html) [x](javascript:alert(1))', '', '- one'].join('\n'), 'T')
+  assert.match(html, /<strong>b<\/strong> &lt;i&gt; <a href="privacy.html">p<\/a> x/)
+  assert.match(html, /<li>one<\/li>/)
 })

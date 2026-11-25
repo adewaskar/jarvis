@@ -146,9 +146,43 @@ Agency leads board, following the design in `~/.jarvis/workspace/agency-system.m
 4. **Builder**: builds a one-page demo for each lead, so you have it ready if
    they ask what it would look like. It goes live on Netlify only after you
    approve the lead, and only if `NETLIFY_AUTH_TOKEN` is set.
+   **The video comes first.** JARVIS makes 3–5 mood pictures of the trade (tools,
+   materials, the finished job, the town) with no people, storefronts, logos or
+   text, so nothing pretends to be the real business. `render_hero_video` turns
+   them into a silent looping background: a 1920×1080 file and a 720×1280 phone
+   file, a poster image, and an HTML snippet. A 10-second loop comes out at about
+   0.9 MB, with no watermark. Visitors who turn on reduced motion get the still
+   poster. The page itself uses real facts only: no invented prices, reviews,
+   awards or years in business.
 5. **Copywriter**, **Sender**: write the emails, then send them after you
    approve. Writing them needs an offer, a sender and a business address;
    sending also needs a mail tool.
+6. **After signing**: once you move a card to **WON**, JARVIS fills in the
+   after-signing paperwork (see below) and lists what you still have to do.
+
+### Paperwork before and after they sign
+
+The templates are in `templates/agency/`. JARVIS fills them in for each business
+under `projects/agency/clients/<business>/before|after/`. Any detail it doesn't
+have is written as `[[MISSING: NAME]]` and reported. Never send a document that
+still has one.
+
+| Stage | Documents |
+| --- | --- |
+| **Before** (with the pitch) | `proposal-and-terms.md`: package, price, deposit, revisions, what happens if they say no. `demo-notice.md`: who made the demo and how to have it taken down (the short version goes in the demo's footer). `outreach-privacy.md`: what you hold about the businesses you contact and how they opt out. |
+| **After** (card in WON) | `service-agreement.md`, `care-plan.md` (only when a care fee is set), the client site's `site-privacy-policy.md` and `site-terms.md` (also as ready-to-upload `privacy.html` and `terms.html`), and `launch-checklist.md`. |
+
+Tell JARVIS your terms once: *"Set the agency name to North Star Web, governing
+law to the Province of Manitoba and the federal laws of Canada that apply there,
+50% deposit, 2 revision rounds, care plan $29 a month."* The settings are
+`agencyName`, `governingLaw`, `depositPercent` (default 50), `revisionRounds`
+(default 2) and `careFee`. The paperwork also uses your sender name, email,
+business address and payment link.
+
+**You sign, not JARVIS.** JARVIS never signs, e-signs or accepts terms for
+anyone. The client's privacy and terms pages go on their site only after you
+confirm the agreement is signed. These are plain-language templates, not legal
+advice. Have a lawyer in your province read them once before you first use them.
 
 The run stops at your two approval stages, every time. When it finishes, JARVIS
 rings your phone if leads or pitches are waiting. Without a phone line it shows
