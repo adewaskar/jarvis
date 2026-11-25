@@ -60,6 +60,31 @@ video, and queues it. A publisher posts the queue automatically.
 The autopilot only works while JARVIS is running. Leave `npm start -- --writes`
 open, and keep the PC awake.
 
+### Making it a real channel, not a bot
+
+Platforms pay channels people choose to watch, and refuse to pay mass-produced,
+repetitive uploads. The autopilot is built around that:
+
+- **Each channel has an identity**: who it's for, a recurring format, one visual
+  look, its own narrator voice and a sign-off. Say: *"For the ocean channel: made
+  for curious teens, format is one creature, one superpower, one twist, moody deep-sea
+  photos, voice bm_fable, end with 'follow for tomorrow's creature'."*
+- **Every script is researched and edited**: a specific angle, facts checked on
+  the web, a hook in the first 2 seconds, then a strict rewrite before rendering.
+- **You approve videos first.** New channels hold each video with status
+  "review" and show a Windows notification. Say *"show me videos waiting for
+  review"*, then *"approve it"* or *"no, the visuals are too dark"*. JARVIS keeps
+  your reasons and your praise, and later videos for that channel follow them.
+  Turn this off per channel with *"post the ocean channel without review"* once
+  you trust it. Unattended runs can never approve their own videos.
+- **No repeats**: a title too close to one the channel already made is refused.
+- **No broken uploads**: a video must be vertical, 8-180 seconds and have sound,
+  or it isn't queued.
+- **No watermarks**: free Pollinations pictures carry a small "pollinations.ai"
+  mark, so JARVIS cuts that strip off every picture. The free pictures are small
+  (about 576 px wide) and only average. Better pictures are the first thing worth
+  paying for. `POLLINATIONS_TOKEN` is passed along if you have one.
+
 ### Several channels
 
 Up to 5 channels, each with its own niche, times, platforms (YouTube, TikTok,

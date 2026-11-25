@@ -47,14 +47,52 @@ const DEFAULTS = {
   times: ['09:00', '18:00'],
   postsPerDayPerPlatform: 3,
   instructions: '',
+  review: false,
+  feedback: [],
   lastRuns: {},
   channels: [],
 }
 
+/**
+ * What makes a channel a channel rather than a feed: who it is for, its
+ * recurring format, its look, its narrator and its sign-off. The brief holds
+ * every video to these, so the uploads read as one show.
+ */
+export const IDENTITY = ['audience', 'format', 'visualStyle', 'voice', 'callToAction']
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
+
 /** The channels the autopilot runs: the named ones, or the single main channel from the top-level settings. */
 export function channelList(s) {
-  if (s.channels?.length) return s.channels.map((c) => ({ enabled: true, accounts: {}, ...c }))
-  return [{ id: 'main', enabled: true, niche: s.niche, style: s.style, platforms: s.platforms, times: s.times, postsPerDayPerPlatform: s.postsPerDayPerPlatform, instructions: s.instructions, accounts: {} }]
+  // Named channels hold every video for the owner's OK unless told otherwise.
+  if (s.channels?.length) return s.channels.map((c) => ({ enabled: true, accounts: {}, review: true, feedback: [], ...c }))
+  return [
+    {
+      id: 'main',
+      enabled: true,
+      niche: s.niche,
+      style: s.style,
+      platforms: s.platforms,
+      times: s.times,
+      postsPerDayPerPlatform: s.postsPerDayPerPlatform,
+      instructions: s.instructions,
+      review: Boolean(s.review),
+      feedback: s.feedback ?? [],
+      ...pick(s, IDENTITY),
+      accounts: {},
+    },
+  ]
+}
+
+const STOP = new Set(['the', 'and', 'for', 'you', 'your', 'this', 'that', 'with', 'how', 'why', 'what', 'are', 'was', 'from', 'into', 'about', 'will', 'can', 'its', 'these', 'those', 'shorts'])
+const titleWords = (t) => new Set(String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 2 && !STOP.has(w)))
+/** Share of meaningful words two titles have in common (0-1). */
+export function titleOverlap(a, b) {
+  const A = titleWords(a)
+  const B = titleWords(b)
+  if (!A.size || !B.size) return 0
+  let both = 0
+  for (const w of A) if (B.has(w)) both++
+  return both / (A.size + B.size - both)
 }
 
 /** Which account a channel posts to on a platform: an explicit choice, else the channel's own name, else main. */
@@ -93,10 +131,12 @@ const hhmm = () => new Date().toTimeString().slice(0, 5)
  *   checkPath: (p: string) => string|null,
  *   publishers: Record<string, (item: object) => Promise<object>>,
  *   isConnected?: (platform: string, account: string|null) => boolean,
+ *   probe?: ((path: string) => Promise<{ duration: number, width?: number, height?: number, hasAudio: boolean }>) | null,
+ *   onReview?: ((item: object) => void) | null,
  *   runAgent: (prompt: string) => Promise<string>,
  * }} o
  */
-export function createAutopilot({ workspace, allowWrites, checkPath, publishers, isConnected = () => true, runAgent }) {
+export function createAutopilot({ workspace, allowWrites, checkPath, publishers, isConnected = () => true, probe = null, onReview = null, runAgent }) {
   const db = store(join(workspace, 'autopilot'))
   const settings = () => ({ ...DEFAULTS, ...db.read('settings', DEFAULTS) })
   const queue = () => db.read('queue', [])
@@ -116,7 +156,8 @@ export function createAutopilot({ workspace, allowWrites, checkPath, publishers,
       const s = settings()
       const items = queue()
       for (const item of items) {
-        if (item.status === 'done' || item.status === 'cancelled' || new Date(item.at) > new Date()) continue
+        // 'review' = waiting for the owner's OK (approve_scheduled_post).
+        if (item.status === 'done' || item.status === 'cancelled' || item.status === 'review' || new Date(item.at) > new Date()) continue
         item.results ??= {}
         const channel = channelOf(s, item.channel ?? 'main')
         const cap = Math.min(HARD_CAP, channel?.postsPerDayPerPlatform ?? s.postsPerDayPerPlatform)
@@ -193,30 +234,45 @@ export function createAutopilot({ workspace, allowWrites, checkPath, publishers,
   function brief(c) {
     const products = db.read('products', []).filter((p) => p.active !== false)
     const named = c.id !== 'main'
+    const recent = queue()
+      .filter((q) => (q.channel ?? 'main') === c.id && q.status !== 'cancelled')
+      .slice(-15)
+      .map((q) => `- ${q.title}`)
+    const liked = (c.feedback ?? []).filter((x) => x.kind === 'approved' && x.note).slice(-5)
+    const disliked = (c.feedback ?? []).filter((x) => x.kind === 'rejected').slice(-6)
+    const line = (label, v) => (v ? `${label}: ${v}\n` : '')
     return `AUTOPILOT RUN — nobody is listening; do not speak, just work.
 
-Make ONE short vertical video for the ${named ? `"${c.id}" channel` : "user's channels"} and queue it.
+Make ONE short vertical video for the ${named ? `"${c.id}" channel` : "user's channel"} and queue it. This is a real
+channel with a real audience, not a content farm: one video a viewer is glad they watched beats
+five forgettable ones. If you cannot make it good today, queue nothing and say why.
 
-${named ? `Channel: ${c.id} (one of several channels the user runs; each has its own audience and niche)
-` : ''}Niche: ${c.niche}
-Style: ${c.style === 'clips' ? "cut the best moment from the user's own footage in the workspace folder 'footage' (skip if empty and say so)" : c.style === 'both' ? "alternate: AI short today if the last queued post was a clip, otherwise a clip from the user's footage in 'footage'" : 'AI faceless short: script, voiceover, generated visuals, word-by-word captions, music if available'}
+THE CHANNEL
+${line('Niche', c.niche)}${line('Made for', c.audience)}${line('Recurring format', c.format)}${line('Look', c.visualStyle)}${line('Narrator voice (create_voiceover voice)', c.voice)}${line('Sign-off / call to action', c.callToAction)}Style: ${c.style === 'clips' ? "cut the best moment from the user's own footage in the workspace folder 'footage' (skip if empty and say so)" : c.style === 'both' ? "alternate: AI short today if the last queued post was a clip, otherwise a clip from the user's footage in 'footage'" : 'faceless short: script, narration, generated visuals, word-by-word captions'}
 Platforms: ${(c.platforms ?? []).join(', ')}
-${c.instructions ? `Extra instructions from the user: ${c.instructions}
-` : ''}${products.length ? `Products/links you may mention (at most one, only when relevant): ${products.map((p) => `${p.name} — ${p.link ?? 'link in bio'}`).join('; ')}
-` : ''}
-Steps:
-1. Check what is trending in the niche (search_youtube) and what this channel already made
-   (list_queue${named ? ` with channel "${c.id}"` : ''}). ${named ? 'The analytics tools read the main accounts only, so judge this channel by its queue.' : 'Check what performed best recently (YouTube analytics, TikTok and Instagram lists).'}
-   Pick an angle that has not been done in the last 10 queued posts.
-2. Write a 20–45 second script with a hook in the first two seconds. It must be genuinely
-   useful or entertaining on its own: a real fact, story or tip, not filler. Platforms refuse
-   to pay mass-produced, repetitive videos, so vary the format, visuals and voice of each post.
-3. Build it with the studio tools: create_image for each scene (4-8 scenes, consistent style),
-   create_voiceover (free, on this laptop), then render_short; or render_clip for footage.
-4. Queue it with create_scheduled_post${named ? ` (channel: "${c.id}")` : ''} for all of this channel's platforms at the
-   next free slot, with a platform-appropriate caption and 3–6 relevant hashtags. YouTube
-   title under 70 characters. Mark brandOrganic if it promotes the user's own product.
-5. Finish with one line: what you made and when it will post.
+${c.instructions ? `Standing instructions from the user: ${c.instructions}\n` : ''}${products.length ? `Products/links you may mention (at most one, only when it truly fits): ${products.map((p) => `${p.name} — ${p.link ?? 'link in bio'}`).join('; ')}\n` : ''}${recent.length ? `\nAlready made (do NOT repeat these topics or angles):\n${recent.join('\n')}\n` : ''}${liked.length ? `\nThe owner liked: ${liked.map((x) => x.note).join(' | ')}\n` : ''}${disliked.length ? `The owner turned these down, avoid the same mistakes: ${disliked.map((x) => `"${x.title}"${x.note ? ` (${x.note})` : ''}`).join(' | ')}\n` : ''}
+STEPS
+1. Topic. Look at what is working in the niche right now (search_youtube, web search) and pick
+   ONE specific, surprising angle this channel has not covered. Specific beats general:
+   "Why octopuses taste with their arms" beats "Amazing ocean facts".
+2. Research. Get the facts from reliable sources (web search) and keep only what you can back up.
+   No invented numbers, quotes or studies. If it is a story, it must be true or clearly framed as fiction.
+3. Script, 25–50 seconds, written for the ear:
+   - Hook in the first 2 seconds that makes a promise ("This fish can walk on land.").
+   - Pay it off with 2–4 beats, each adding something new. Short sentences. No filler.
+   - End with a twist, a payoff or a line that loops back to the start${c.callToAction ? ', then the sign-off' : ''}.
+   Then reread it as a strict editor: cut every sentence that does not earn its place, make the
+   hook sharper, check every fact. Rewrite once.
+4. Visuals: 5–8 scenes with create_image, one per beat, all in the channel's look${c.visualStyle ? '' : ' (pick one consistent style and stick to it)'},
+   each showing exactly what the narration says at that moment. No text, logos or brands in the
+   images. Never use footage, music or images you were not given or did not generate.
+5. Narrate with create_voiceover${c.voice ? ` (voice "${c.voice}")` : ''}, then render_short with the scenes timed to the beats.
+6. Check the result with get_media_info before queueing: vertical, 15–60 seconds, has sound.
+7. Queue it with create_scheduled_post${named ? ` (channel: "${c.id}")` : ''} for this channel's platforms at the next
+   free slot. Title: honest and curiosity-driven, under 70 characters, no clickbait the video
+   does not deliver. Captions written for each platform, with 3–5 specific hashtags.
+   Mark brandOrganic if it promotes the user's own product.${c.review ? '\n   This channel holds every video for the owner to approve first; it will not post until they do.' : ''}
+8. Finish with one line: what you made and when it will post.
 
 Never post directly — only queue. Never use copyrighted music or footage you were not given.`
   }
@@ -262,7 +318,7 @@ Never post directly — only queue. Never use copyrighted music or footage you w
     ),
     tool(
       'list_queue',
-      'The posting queue: upcoming, done and failed posts with per-platform results and links. Pass channel to see one channel only.',
+      'The posting queue: upcoming, done and failed posts with per-platform results and links; status "review" means waiting for the owner to approve. Pass channel to see one channel only.',
       { includeDone: z.boolean().optional().catch(undefined), channel: z.string().optional().catch(undefined) },
       safe(async ({ includeDone = true, channel }) =>
         queue()
@@ -288,6 +344,12 @@ and any standing instructions (tone, topics to avoid, call to action).`,
         times: z.array(z.string().regex(/^\d\d:\d\d$/)).max(10).optional(),
         postsPerDayPerPlatform: z.number().int().min(1).max(HARD_CAP).optional(),
         instructions: z.string().max(2000).optional(),
+        audience: z.string().max(300).optional().describe('Who the channel is for'),
+        format: z.string().max(600).optional().describe('The recurring structure every video follows, e.g. "one myth, the truth, one practical tip"'),
+        visualStyle: z.string().max(300).optional().describe('One consistent look, e.g. "moody cinematic photos, teal and orange"'),
+        voice: z.string().regex(/^[abefhijpz][fm]_[a-z]+$/).optional().describe('Kokoro narrator, e.g. bm_george, bm_fable, am_michael, af_heart'),
+        callToAction: z.string().max(200).optional(),
+        review: z.boolean().optional().describe('Hold each video until the owner approves it'),
       },
       safe(async (patch) => {
         const s = { ...settings(), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) }
@@ -304,6 +366,8 @@ and any standing instructions (tone, topics to avoid, call to action).`,
 platforms (youtube, tiktok, instagram, facebook), creation times (HH:MM, 24h), posts per platform per day
 (max ${HARD_CAP}), instructions and accounts. By default a channel posts with the accounts named after it
 (connected with --account <id>); set accounts to use others, e.g. { "youtube": "main" }.
+Give it an identity (audience, format, visualStyle, voice, callToAction) so it reads as one show.
+New channels hold every video for the owner's approval (review); set review:false to post unattended.
 Each channel needs a different niche: near-identical channels get flagged as mass-produced content.`,
       {
         id: z.string().regex(ACCOUNT_RE).describe('Short lowercase name, e.g. "cooking"'),
@@ -315,6 +379,12 @@ Each channel needs a different niche: near-identical channels get flagged as mas
         times: z.array(z.string().regex(/^\d\d:\d\d$/)).max(10).optional(),
         postsPerDayPerPlatform: z.number().int().min(1).max(HARD_CAP).optional(),
         instructions: z.string().max(2000).optional(),
+        audience: z.string().max(300).optional().describe('Who the channel is for'),
+        format: z.string().max(600).optional().describe('The recurring structure every video follows, e.g. "one myth, the truth, one practical tip"'),
+        visualStyle: z.string().max(300).optional().describe('One consistent look, e.g. "moody cinematic photos, teal and orange"'),
+        voice: z.string().regex(/^[abefhijpz][fm]_[a-z]+$/).optional().describe('Kokoro narrator, e.g. bm_george, bm_fable, am_michael, af_heart'),
+        callToAction: z.string().max(200).optional(),
+        review: z.boolean().optional().describe('Hold each video until the owner approves it'),
         accounts: z.record(z.enum(PLATFORMS), z.string().regex(ACCOUNT_RE)).optional(),
       },
       safe(async ({ id, remove, ...patch }) => {
@@ -332,7 +402,7 @@ Each channel needs a different niche: near-identical channels get flagged as mas
         const base =
           i >= 0
             ? list[i]
-            : { id, enabled: true, style: 'ai-shorts', platforms: [...PLATFORMS], times: ['10:00'], postsPerDayPerPlatform: 1, instructions: '', accounts: {} }
+            : { id, enabled: true, style: 'ai-shorts', platforms: [...PLATFORMS], times: ['10:00'], postsPerDayPerPlatform: 1, instructions: '', review: true, feedback: [], accounts: {} }
         const next = { ...base, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)), id }
         if (!next.niche) throw new Error('A new channel needs a niche.')
         const norm = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
@@ -376,27 +446,53 @@ The publisher posts it automatically and respects the daily caps.`,
         if (!existsSync(p.video)) throw new Error('That video file does not exist.')
         const at = p.at ? new Date(p.at) : new Date()
         if (Number.isNaN(at.getTime())) throw new Error('at must be an ISO date/time.')
-        if (p.channel && p.channel !== 'main' && !channelOf(settings(), p.channel)) {
-          throw new Error(`No channel called "${p.channel}". Add it with update_autopilot_channel first.`)
-        }
-        const item = { id: randomUUID().slice(0, 8), status: 'queued', created: new Date().toISOString(), ...p, at: at.toISOString(), results: {} }
+        const channel = channelOf(settings(), p.channel ?? 'main')
+        if (!channel) throw new Error(`No channel called "${p.channel}". Add it with update_autopilot_channel first.`)
         const q = queue()
+        // Originality: refuse a near-repeat of something this channel already made.
+        const twin = q
+          .filter((x) => (x.channel ?? 'main') === channel.id && x.status !== 'cancelled')
+          .slice(-30)
+          .find((x) => titleOverlap(x.title, p.title) >= 0.6)
+        if (twin) throw new Error(`Too close to "${twin.title}", which this channel already made. Pick a different topic or angle.`)
+        // Quality: the file has to be a watchable vertical short with sound.
+        if (probe) {
+          const m = await probe(p.video).catch(() => null)
+          if (!m) throw new Error('Could not read that video file; render it again.')
+          if (m.duration < 8 || m.duration > 180) throw new Error(`The video is ${m.duration.toFixed(0)} s long; shorts need 8-180 s (aim for 25-50).`)
+          if (!m.hasAudio) throw new Error('The video has no sound. Add the narration (create_voiceover) and render again.')
+          if (m.width && m.height && m.height < m.width) throw new Error('The video is not vertical; render it at 1080x1920.')
+        }
+        const status = channel.review ? 'review' : 'queued'
+        const item = { id: randomUUID().slice(0, 8), status, created: new Date().toISOString(), ...p, at: at.toISOString(), results: {} }
         q.push(item)
         db.write('queue', q)
-        return { queued: item.id, at: item.at, platforms: item.platforms, willPost: allowWrites ? 'automatically' : 'when JARVIS runs with writes' }
+        if (status === 'review') {
+          try {
+            onReview?.(item)
+          } catch {}
+        }
+        return {
+          queued: item.id,
+          at: item.at,
+          platforms: item.platforms,
+          willPost: status === 'review' ? 'after the owner approves it' : allowWrites ? 'automatically' : 'when JARVIS runs with writes',
+        }
       }),
     ),
     tool(
       'delete_scheduled_post',
-      'Cancel a queued post by id (platforms it already went to are not affected).',
-      { id: z.string() },
-      safe(async ({ id }) => {
+      'Cancel a queued post by id (platforms it already went to are not affected). When the owner turns a video down, pass their reason as feedback: future videos for that channel avoid it.',
+      { id: z.string(), feedback: z.string().max(300).optional() },
+      safe(async ({ id, feedback }) => {
         const q = queue()
         const item = q.find((x) => x.id === id)
         if (!item) throw new Error('No queued post with that id.')
+        const wasReview = item.status === 'review'
         item.status = 'cancelled'
         db.write('queue', q)
-        return { cancelled: id }
+        if (wasReview || feedback) remember(item, 'rejected', feedback)
+        return { cancelled: id, learned: Boolean(wasReview || feedback) }
       }),
     ),
     tool(
@@ -445,15 +541,55 @@ The publisher posts it automatically and respects the daily caps.`,
     ),
   ]
 
+  /** Keep the owner's verdicts per channel (last 12) so the brief learns their taste. */
+  function remember(item, kind, note) {
+    const s = settings()
+    const entry = { kind, title: item.title, ...(note ? { note } : {}), at: today() }
+    const id = item.channel ?? 'main'
+    if (id === 'main' && !s.channels?.length) s.feedback = [...(s.feedback ?? []), entry].slice(-12)
+    else {
+      const c = (s.channels ?? []).find((x) => x.id === id)
+      if (!c) return
+      c.feedback = [...(c.feedback ?? []), entry].slice(-12)
+    }
+    db.write('settings', s)
+  }
+
+  // Only the owner, in a live session, can let a held video out.
+  const approvals = [
+    tool(
+      'approve_scheduled_post',
+      'Let a video that is waiting for review post. Only when the owner has watched it and said yes. Optional at (ISO) to post later; optional feedback on what they liked.',
+      { id: z.string(), at: z.string().optional(), feedback: z.string().max(300).optional() },
+      safe(async ({ id, at, feedback }) => {
+        const q = queue()
+        const item = q.find((x) => x.id === id)
+        if (!item) throw new Error('No queued post with that id.')
+        if (item.status !== 'review') throw new Error(`That post is ${item.status}, not waiting for review.`)
+        if (at) {
+          const d = new Date(at)
+          if (Number.isNaN(d.getTime())) throw new Error('at must be an ISO date/time.')
+          item.at = d.toISOString()
+        }
+        item.status = 'queued'
+        item.approved = new Date().toISOString()
+        db.write('queue', q)
+        remember(item, 'approved', feedback)
+        return { approved: id, at: item.at, platforms: item.platforms }
+      }),
+    ),
+  ]
+
   // One server instance per agent session, like the bridge's other servers.
-  const makeServer = () => createSdkMcpServer({
+  // Headless runs (live: false) never get the approval tool.
+  const makeServer = ({ live = true } = {}) => createSdkMcpServer({
     name: 'jarvis_autopilot',
     version: '1.0.0',
     instructions:
       'The posting queue, the autopilot schedule, and the business ledger (products, affiliate links, brand deals). ' +
       'Posting to several platforms goes through create_scheduled_post. Selling or transferring social accounts is not supported: it breaks platform rules.',
     alwaysLoad: true,
-    tools: allowWrites ? [...reads, ...writes] : reads,
+    tools: allowWrites ? [...reads, ...writes, ...(live ? approvals : [])] : reads,
   })
 
   return { makeServer, start, publishDue }

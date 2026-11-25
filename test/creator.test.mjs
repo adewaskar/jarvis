@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { decideTool } from '../bridge/policy.mjs'
 import { createPipelines } from '../bridge/pipelines.mjs'
-import { createAutopilot } from '../bridge/autopilot.mjs'
+import { createAutopilot, titleOverlap } from '../bridge/autopilot.mjs'
 import { accountArg, accountSecret, currentAccount, listAccounts, withAccount, withoutAccountArg } from '../bridge/accounts.mjs'
 import { systemServer } from '../bridge/system.mjs'
 
@@ -25,7 +25,7 @@ const WRITES = {
   jarvis_instagram: ['upload_instagram_reel', 'post_instagram_comment_reply'],
   jarvis_studio: ['create_image', 'create_voiceover', 'create_captions', 'render_short', 'render_clip'],
   jarvis_crypto: ['create_nft_package'],
-  jarvis_autopilot: ['update_autopilot_settings', 'update_autopilot_channel', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
+  jarvis_autopilot: ['update_autopilot_settings', 'update_autopilot_channel', 'approve_scheduled_post', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
   jarvis_pipelines: ['create_pipeline_card', 'update_pipeline_card', 'delete_pipeline_card'],
   jarvis_system: ['launch_app', 'launch_link', 'close_app', 'set_volume', 'lock_computer', 'sleep_computer', 'schedule_shutdown', 'cancel_shutdown'],
   jarvis_agency: ['update_agency_settings', 'launch_agency_run', 'call_owner'],
@@ -154,8 +154,8 @@ test('autopilot runs several channels, each through its own accounts', async () 
     runAgent: async () => 'ok',
   })
   const srv = ap.makeServer()
-  assert.equal((await call(srv, 'update_autopilot_channel', { id: 'cooking', niche: 'Ten-minute dinners', platforms: ['youtube', 'facebook'] })).error, undefined)
-  assert.equal((await call(srv, 'update_autopilot_channel', { id: 'space', niche: 'Space facts', platforms: ['tiktok', 'youtube'], accounts: { youtube: 'main' } })).error, undefined)
+  assert.equal((await call(srv, 'update_autopilot_channel', { id: 'cooking', niche: 'Ten-minute dinners', platforms: ['youtube', 'facebook'], review: false })).error, undefined)
+  assert.equal((await call(srv, 'update_autopilot_channel', { id: 'space', niche: 'Space facts', platforms: ['tiktok', 'youtube'], accounts: { youtube: 'main' }, review: false })).error, undefined)
   // Same niche twice is refused; so is a sixth channel.
   assert.match((await call(srv, 'update_autopilot_channel', { id: 'dinners', niche: 'ten minute dinners!' })).data, /already has that niche/)
   for (const n of ['a', 'b', 'c']) await call(srv, 'update_autopilot_channel', { id: n, niche: `niche ${n}` })
@@ -175,4 +175,57 @@ test('autopilot runs several channels, each through its own accounts', async () 
   assert.deepEqual(cooking.accounts.youtube, { account: 'cooking', connected: true })
   assert.equal(cooking.postedToday.youtube, 1)
   assert.equal(st.channels.length, 5)
+})
+
+test('new channels hold videos for review, refuse repeats and learn from feedback', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'jarvis-rev-'))
+  const video = join(ws, 'v.mp4')
+  writeFileSync(video, 'x')
+  const posted = []
+  const notified = []
+  let media = { duration: 34, width: 1080, height: 1920, hasAudio: true }
+  const ap = createAutopilot({
+    workspace: ws,
+    allowWrites: true,
+    checkPath: () => null,
+    publishers: { youtube: async (it) => (posted.push(it.title), { id: 'y' }) },
+    probe: async () => media,
+    onReview: (it) => notified.push(it.title),
+    runAgent: async () => 'ok',
+  })
+  const live = ap.makeServer({ live: true })
+  const headless = ap.makeServer({ live: false })
+  const names = (srv) => Object.keys(srv.instance._registeredTools)
+  assert.ok(names(live).includes('approve_scheduled_post'))
+  assert.ok(!names(headless).includes('approve_scheduled_post'), 'an unattended run cannot approve its own video')
+
+  await call(live, 'update_autopilot_channel', { id: 'ocean', niche: 'Strange sea creatures', platforms: ['youtube'], voice: 'bm_fable', format: 'one creature, one superpower, one twist' })
+  const a = await call(headless, 'create_scheduled_post', { video, title: 'Why octopuses taste with their arms', channel: 'ocean', platforms: ['youtube'] })
+  assert.match(a.data.willPost, /approves/)
+  assert.deepEqual(notified, ['Why octopuses taste with their arms'])
+  await ap.publishDue()
+  assert.deepEqual(posted, [], 'held until approved')
+
+  // Near-repeats and broken renders are refused.
+  assert.match((await call(headless, 'create_scheduled_post', { video, title: 'Octopuses taste with their arms - why?', channel: 'ocean', platforms: ['youtube'] })).data, /Too close/)
+  media = { duration: 30, width: 1080, height: 1920, hasAudio: false }
+  assert.match((await call(headless, 'create_scheduled_post', { video, title: 'The fish that walks', channel: 'ocean', platforms: ['youtube'] })).data, /no sound/)
+  media = { duration: 30, width: 1920, height: 1080, hasAudio: true }
+  assert.match((await call(headless, 'create_scheduled_post', { video, title: 'The fish that walks', channel: 'ocean', platforms: ['youtube'] })).data, /not vertical/)
+  media = { duration: 30, width: 1080, height: 1920, hasAudio: true }
+
+  // The owner approves one and turns one down with a reason.
+  assert.equal((await call(live, 'approve_scheduled_post', { id: a.data.queued, feedback: 'great hook' })).data.approved, a.data.queued)
+  await ap.publishDue()
+  assert.deepEqual(posted, ['Why octopuses taste with their arms'])
+  const b = await call(headless, 'create_scheduled_post', { video, title: 'The fish that walks on land', channel: 'ocean', platforms: ['youtube'] })
+  assert.equal((await call(live, 'delete_scheduled_post', { id: b.data.queued, feedback: 'visuals too dark' })).data.learned, true)
+  const ocean = (await call(live, 'get_autopilot_settings', {})).data.channels.find((c) => c.id === 'ocean')
+  assert.deepEqual(ocean.feedback.map((x) => [x.kind, x.note]), [['approved', 'great hook'], ['rejected', 'visuals too dark']])
+  assert.equal(ocean.voice, 'bm_fable')
+})
+
+test('title overlap spots rewordings, not unrelated topics', () => {
+  assert.ok(titleOverlap('Why octopuses taste with their arms', 'Octopuses taste with arms!') >= 0.6)
+  assert.ok(titleOverlap('Why octopuses taste with their arms', 'The fish that walks on land') < 0.2)
 })

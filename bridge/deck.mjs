@@ -161,6 +161,7 @@ export function createDeck({ workspace, pipelines, on, model, effort, writes, br
         times: settings.times ?? [],
         channels: (settings.channels ?? []).map((c) => ({ id: c.id, niche: c.niche, enabled: c.enabled !== false })),
         queued: queue.filter((q) => q.status !== 'done' && q.status !== 'cancelled').length,
+        awaitingReview: queue.filter((q) => q.status === 'review').length,
         recent,
       },
       crypto: coins ?? [],

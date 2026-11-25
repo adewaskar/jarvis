@@ -28,7 +28,8 @@ import { instagramConnected, instagramPublishReel, instagramServer } from './ins
 import { facebookConnected, facebookPublishReel, makeFacebookServer } from './facebook.mjs'
 import { accountSecret, listAccounts } from './accounts.mjs'
 import { hasSecret } from './secrets.mjs'
-import { ffmpegAvailable, studioServer } from './studio.mjs'
+import { ffmpegAvailable, probe as probeVideo, studioServer } from './studio.mjs'
+import { toast } from './phone.mjs'
 import { configuredWallets, cryptoServer } from './crypto.mjs'
 import { createAutopilot } from './autopilot.mjs'
 import { createPipelines } from './pipelines.mjs'
@@ -511,6 +512,9 @@ const PROMPT_CREATOR = `The creator suite — their channels, studio and money:
   You cannot create social accounts or channels yourself: the user makes them and
   connects each with "npm run youtube:connect -- --account <channel>" or
   "npm run social:connect -- <platform> --account <channel>".
+  Videos with status "review" wait for the owner. Show each one (show_video) and
+  approve_scheduled_post only after they say yes; if they turn it down, cancel it
+  with their reason as feedback so later videos learn from it.
   Products, affiliate links and brand deals live there too.
 - Crypto (jarvis_crypto): prices, their watch-only wallets, payment links and QR
   codes to their OWN addresses, NFT packages. You hold no keys and can never
@@ -596,6 +600,9 @@ const autopilot = AUTOPILOT_ON
       checkPath: checkToolPath,
       publishers: PUBLISHERS,
       isConnected: accountConnected,
+      probe: STUDIO_ON ? probeVideo : null,
+      // A held video waits for the owner; tell them without reading anything aloud.
+      onReview: (it) => void toast('JARVIS: a video is ready for review', `${it.channel ?? 'main'}: ${it.title}. Say "show me videos waiting for review".`),
       runAgent: (prompt) => runAgent(prompt),
     })
   : null
@@ -652,7 +659,7 @@ function creatorServers({ live = true, show = null } = {}) {
         }
       : {}),
     ...(CRYPTO_ON ? { jarvis_crypto: cryptoServer({ ...opts, workspace: WORKSPACE }) } : {}),
-    ...(autopilot ? { jarvis_autopilot: autopilot.makeServer() } : {}),
+    ...(autopilot ? { jarvis_autopilot: autopilot.makeServer({ live }) } : {}),
     // Live sessions only: an agency run must not start another or ring the phone itself.
     ...(agency && live ? { jarvis_agency: agency.makeServer() } : {}),
     // The laptop. Power tools (sleep, shutdown) only exist in live sessions.

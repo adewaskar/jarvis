@@ -250,7 +250,7 @@ function TaskProgress({ d }: { d: Snapshot | null }) {
   const rows: { icon: string; label: string; pct: number; note: string; tone?: string }[] = [
     { icon: '▶', label: 'Shorts posted today', pct: (postedToday / perDay) * 100, note: `${postedToday}/${perDay}` },
     { icon: '▦', label: 'YouTube pipeline in progress', pct: ytAll ? (ytInWork / ytAll) * 100 : 0, note: `${ytInWork}/${ytAll}` },
-    { icon: '◷', label: 'Autopilot queue', pct: Math.min(100, (ap?.queued ?? 0) * 25), note: `${ap?.queued ?? 0} queued` },
+    { icon: '◷', label: 'Autopilot queue', pct: Math.min(100, (ap?.queued ?? 0) * 25), note: ap?.awaitingReview ? `${ap.queued ?? 0} queued · ${ap.awaitingReview} to review` : `${ap?.queued ?? 0} queued` },
     { icon: '⛁', label: 'Disk used', pct: sys?.disks[0]?.usedPercent ?? 0, note: `${sys?.disks[0]?.usedPercent ?? '—'}%` },
     { icon: '▥', label: 'Memory in use', pct: sys?.memory.percent ?? 0, note: `${sys?.memory.percent ?? '—'}%`, tone: (sys?.memory.percent ?? 0) > 85 ? 'warn' : '' },
   ]

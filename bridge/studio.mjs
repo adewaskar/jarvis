@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { spawn } from 'node:child_process'
-import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
@@ -41,7 +41,7 @@ function run(bin, args, cwd) {
 
 export const ffmpegAvailable = () => run(FFMPEG, ['-version']).then(() => true, () => false)
 
-async function probe(path) {
+export async function probe(path) {
   const out = await run(FFPROBE, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path])
   const j = JSON.parse(out)
   const v = j.streams.find((s) => s.codec_type === 'video')
@@ -294,12 +294,25 @@ export function studioServer({ allowWrites, checkPath, workspace, elevenKey, onR
         let lastError = ''
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
-            const r = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${q}`, { signal: AbortSignal.timeout(120000) })
+            const token = process.env.POLLINATIONS_TOKEN
+            const r = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${q}`, {
+              headers: token ? { authorization: `Bearer ${token}` } : {},
+              signal: AbortSignal.timeout(120000),
+            })
             const type = r.headers.get('content-type') ?? ''
             if (!r.ok || !type.startsWith('image/')) throw new Error(`image service answered ${r.status}`)
-            const out = join(dir, `${stamp()}-${slug(prompt)}.${type.includes('png') ? 'png' : 'jpg'}`)
-            await writeFile(out, Buffer.from(await r.arrayBuffer()))
-            return { image: out, width, height }
+            const base = join(dir, `${stamp()}-${slug(prompt)}`)
+            const raw = `${base}.raw.${type.includes('png') ? 'png' : 'jpg'}`
+            const out = `${base}.jpg`
+            await writeFile(raw, Buffer.from(await r.arrayBuffer()))
+            // Free Pollinations images carry a "pollinations.ai" mark in the bottom-right
+            // corner even with nologo=true. Cut the bottom 7% off so no video shows it;
+            // the Ken Burns crop in render_short fills the frame again.
+            await run(FFMPEG, ['-y', '-v', 'error', '-i', raw, '-vf', 'crop=iw:trunc(ih*0.93/2)*2:0:0', '-q:v', '2', out])
+            await rm(raw, { force: true })
+            // The free tier often sends a smaller picture than asked; report what arrived.
+            const got = await probe(out).catch(() => null)
+            return { image: out, width: got?.width ?? width, height: got?.height ?? height }
           } catch (e) {
             lastError = e.message
             await new Promise((res) => setTimeout(res, attempt * 3000))
