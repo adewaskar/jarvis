@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { spawn } from 'node:child_process'
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
 import { safe } from './secrets.mjs'
@@ -9,7 +10,8 @@ import { safe } from './secrets.mjs'
  * JARVIS's edit suite: vertical 1080x1920 videos for Shorts, Reels and TikTok.
  *
  * Built on ffmpeg (FFMPEG_PATH / FFPROBE_PATH, else whatever is on PATH).
- * Voiceovers and auto-captions use ElevenLabs when a key is configured.
+ * Voiceovers use Kokoro, a free voice running on this laptop; transcribing
+ * existing footage (create_captions) still uses ElevenLabs when a key is set.
  * Every output lands in <workspace>/studio/<job>/, inside the folders the
  * posting tools are allowed to read, so "render it, then post it" just works.
  */
@@ -62,30 +64,84 @@ const srtTime = (t) => {
 
 /** Words with timings -> short, punchy caption lines (the Shorts look). */
 function wordsToSrt(words, perLine = 3) {
-  const lines = []
-  for (let i = 0; i < words.length; i += perLine) {
-    const chunk = words.slice(i, i + perLine)
-    lines.push(`${lines.length + 1}\n${srtTime(chunk[0].start)} --> ${srtTime(chunk.at(-1).end)}\n${chunk.map((w) => w.text).join(' ').toUpperCase()}\n`)
+  // A line never runs across the end of a sentence.
+  const groups = []
+  let cur = []
+  for (const w of words) {
+    cur.push(w)
+    if (cur.length >= perLine || /[.!?]["'”’)\]]*$/.test(w.text)) {
+      groups.push(cur)
+      cur = []
+    }
   }
-  return lines.join('\n')
+  if (cur.length) groups.push(cur)
+  return groups
+    .map((chunk, i) => `${i + 1}\n${srtTime(chunk[0].start)} --> ${srtTime(chunk.at(-1).end)}\n${chunk.map((w) => w.text).join(' ').toUpperCase()}\n`)
+    .join('\n')
 }
 
-/** ElevenLabs character alignment -> word timings. */
-function alignmentToWords(al) {
-  const words = []
-  let cur = null
-  al.characters.forEach((ch, i) => {
-    if (/\s/.test(ch)) {
-      if (cur) words.push(cur)
-      cur = null
-    } else {
-      cur ??= { text: '', start: al.character_start_times_seconds[i] }
-      cur.text += ch
-      cur.end = al.character_end_times_seconds[i]
-    }
+/*
+ * Voiceovers: Kokoro (github.com/hexgrad/kokoro, Apache-2.0), an 82M neural
+ * voice that runs on this laptop's CPU. Free, offline, no key. The owner picked
+ * bm_george on 2026-11-24 to replace ElevenLabs. About 1.25 s of work per
+ * second of speech here; the model (q8, ~90 MB) is cached in ~/.jarvis/models/hf.
+ */
+const KOKORO_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX'
+const KOKORO_DEFAULT_VOICE = process.env.JARVIS_KOKORO_VOICE || 'bm_george'
+let kokoroLoading = null
+function kokoro() {
+  kokoroLoading ??= (async () => {
+    const { env } = await import('@huggingface/transformers')
+    env.cacheDir = join(homedir(), '.jarvis', 'models', 'hf')
+    const { KokoroTTS } = await import('kokoro-js')
+    return KokoroTTS.from_pretrained(KOKORO_MODEL, { dtype: 'q8', device: 'cpu' })
+  })().catch((e) => {
+    kokoroLoading = null
+    throw new Error(`The Kokoro voice failed to load: ${e.message}`)
   })
-  if (cur) words.push(cur)
-  return words
+  return kokoroLoading
+}
+
+/** First and last sample louder than the noise floor, so word timings skip the silence Kokoro pads with. */
+function speechSpan(samples, rate) {
+  const thr = 0.01
+  let a = 0
+  let b = samples.length - 1
+  while (a < b && Math.abs(samples[a]) < thr) a++
+  while (b > a && Math.abs(samples[b]) < thr) b--
+  return [a / rate, b / rate]
+}
+
+/** Spread a sentence's words over its spoken span, weighted by length, with extra room after commas. */
+function timeWords(sentence, from, to) {
+  const parts = sentence.split(/\s+/).filter(Boolean)
+  const weight = (w) => Math.max(2, w.replace(/[^\p{L}\p{N}]/gu, '').length) + (/[,;:—–-]$/.test(w) ? 3 : 0) + 1
+  const total = parts.reduce((s, w) => s + weight(w), 0) || 1
+  let t = from
+  return parts.map((text) => {
+    const d = ((to - from) * weight(text)) / total
+    const w = { text, start: t, end: t + d }
+    t += d
+    return w
+  })
+}
+
+function wavBuffer(samples, rate) {
+  const buf = Buffer.alloc(44 + samples.length * 2)
+  buf.write('RIFF', 0)
+  buf.writeUInt32LE(36 + samples.length * 2, 4)
+  buf.write('WAVEfmt ', 8)
+  buf.writeUInt32LE(16, 16)
+  buf.writeUInt16LE(1, 20)
+  buf.writeUInt16LE(1, 22)
+  buf.writeUInt32LE(rate, 24)
+  buf.writeUInt32LE(rate * 2, 28)
+  buf.writeUInt16LE(2, 32)
+  buf.writeUInt16LE(16, 34)
+  buf.write('data', 36)
+  buf.writeUInt32LE(samples.length * 2, 40)
+  for (let i = 0; i < samples.length; i++) buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, samples[i])) * 32767), 44 + i * 2)
+  return buf
 }
 
 /** Evenly timed captions for when there is text but no word timings. */
@@ -96,9 +152,9 @@ function evenSrt(text, duration) {
 }
 
 /**
- * @param {{ allowWrites: boolean, checkPath: (p: string) => string|null, workspace: string, elevenKey: () => string|null, voiceId?: string }} o
+ * @param {{ allowWrites: boolean, checkPath: (p: string) => string|null, workspace: string, elevenKey: () => string|null, onRendered?: ((r: object) => void)|null }} o
  */
-export function studioServer({ allowWrites, checkPath, workspace, elevenKey, voiceId, onRendered = null }) {
+export function studioServer({ allowWrites, checkPath, workspace, elevenKey, onRendered = null }) {
   const need = (p) => {
     const problem = checkPath(p)
     if (problem) throw new Error(problem)
@@ -115,22 +171,35 @@ export function studioServer({ allowWrites, checkPath, workspace, elevenKey, voi
     return k
   }
 
-  async function voiceover({ text, voice, name, stability = 0.45, speed = 1.05 }) {
-    const id = voice || voiceId || 'JBFqnCBsd6RMkjVDRZzb'
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${id}/with-timestamps?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: { 'xi-api-key': key(), 'content-type': 'application/json' },
-      body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability, similarity_boost: 0.75, speed } }),
-    })
-    const b = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(`ElevenLabs refused the voiceover: ${b.detail?.message ?? b.detail ?? res.status}`)
+  /** Kokoro, one sentence at a time: exact sentence timings, word timings estimated inside each sentence. */
+  async function voiceover({ text, voice, name, speed = 1 }) {
+    const id = /^[abefhijpz][fm]_[a-z]+$/.test(voice ?? '') ? voice : KOKORO_DEFAULT_VOICE
+    const tts = await kokoro()
+    const sentences = text.replace(/\s+/g, ' ').trim().match(/[^.!?]+[.!?]+["'”’)\]]*|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) ?? []
+    if (!sentences.length) throw new Error('The script is empty.')
+    const chunks = []
+    const words = []
+    let rate = 24000
+    let at = 0
+    for (const s of sentences) {
+      const out = await tts.generate(s, { voice: id, speed })
+      rate = out.sampling_rate
+      const [a, b] = speechSpan(out.audio, rate)
+      words.push(...timeWords(s, at + a, at + b))
+      chunks.push(out.audio, new Float32Array(Math.round(rate * 0.12)))
+      at += out.audio.length / rate + 0.12
+    }
+    const all = new Float32Array(chunks.reduce((n, c) => n + c.length, 0))
+    let o = 0
+    for (const c of chunks) all.set(c, (o += c.length) - c.length)
     const dir = await jobDir(name ?? text.slice(0, 30))
+    const wav = join(dir, 'voiceover.wav')
     const audio = join(dir, 'voiceover.mp3')
     const captions = join(dir, 'captions.srt')
-    await writeFile(audio, Buffer.from(b.audio_base64, 'base64'))
-    const words = alignmentToWords(b.normalized_alignment ?? b.alignment)
+    await writeFile(wav, wavBuffer(all, rate))
+    await run(FFMPEG, ['-y', '-v', 'error', '-i', wav, '-af', 'highpass=f=60,loudnorm=I=-16:TP=-1.5', '-ar', '44100', '-b:a', '160k', audio])
     await writeFile(captions, wordsToSrt(words))
-    return { audio, captions, seconds: +(words.at(-1)?.end ?? 0).toFixed(1) }
+    return { audio, captions, voice: id, seconds: +(all.length / rate).toFixed(1) }
   }
 
   async function transcribe(path) {
@@ -215,12 +284,38 @@ export function studioServer({ allowWrites, checkPath, workspace, elevenKey, voi
 
   const writes = [
     tool(
+      'create_image',
+      'Generate a vertical 1080x1920 picture for a video scene from a text prompt (free, no account: Pollinations). Describe subject, setting, lighting and style ("cinematic photo", "3D render", "anime"). No text in the image: captions are added later. Returns the saved file path for render_short.',
+      { prompt: z.string().min(3).max(800), seed: z.number().int().optional(), width: z.number().int().min(256).max(1920).optional(), height: z.number().int().min(256).max(1920).optional() },
+      safe(async ({ prompt, seed, width = 1080, height = 1920 }) => {
+        const dir = join(workspace, 'studio', 'images')
+        await mkdir(dir, { recursive: true })
+        const q = new URLSearchParams({ width: String(width), height: String(height), nologo: 'true', seed: String(seed ?? Math.floor(Math.random() * 1e9)) })
+        let lastError = ''
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const r = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${q}`, { signal: AbortSignal.timeout(120000) })
+            const type = r.headers.get('content-type') ?? ''
+            if (!r.ok || !type.startsWith('image/')) throw new Error(`image service answered ${r.status}`)
+            const out = join(dir, `${stamp()}-${slug(prompt)}.${type.includes('png') ? 'png' : 'jpg'}`)
+            await writeFile(out, Buffer.from(await r.arrayBuffer()))
+            return { image: out, width, height }
+          } catch (e) {
+            lastError = e.message
+            await new Promise((res) => setTimeout(res, attempt * 3000))
+          }
+        }
+        throw new Error(`Image generation failed after 3 tries: ${lastError}`)
+      }),
+    ),
+    tool(
       'create_voiceover',
-      `Narrate a script with ElevenLabs. Returns an MP3 and word-timed captions (SRT) for render_short.
+      `Narrate a script with Kokoro, the free voice that runs on this laptop (no key, no cost). Returns an MP3 and word-timed captions (SRT) for render_short.
+Takes about 1.25 s per second of speech, plus a few seconds to load the first time.
 Write for the ear: short sentences, a hook in the first three seconds.`,
       {
         text: z.string().min(1).max(5000),
-        voice: z.string().optional().describe('ElevenLabs voice id; default is JARVIS_VOICE_ID'),
+        voice: z.string().optional().describe('Kokoro voice id; default bm_george (the owner\'s pick). Others: bm_fable, bm_lewis, bm_daniel, am_michael, am_fenrir, af_heart'),
         name: z.string().optional(),
         speed: z.number().min(0.7).max(1.2).optional(),
       },

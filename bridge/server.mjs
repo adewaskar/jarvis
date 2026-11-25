@@ -32,6 +32,7 @@ import { createPipelines } from './pipelines.mjs'
 import { systemServer } from './system.mjs'
 import { createDeck } from './deck.mjs'
 import { createBrain } from './brain.mjs'
+import { createAgency } from './agency.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
@@ -499,6 +500,9 @@ const PROMPT_CREATOR = `The creator suite — their channels, studio and money:
 - To post to several platforms use create_scheduled_post; it obeys daily caps
   that keep the accounts from being flagged as bots. Disclose paid partnerships
   (brandContent) and own-product promotion (brandOrganic).
+- The agency loop (jarvis_agency) works the Agency leads board every few hours
+  on its own: get_agency_settings, update_agency_settings, launch_agency_run.
+  call_owner rings the user's phone when they ask for a call.
 - The autopilot (jarvis_autopilot) makes and posts videos on a schedule.
   Products, affiliate links and brand deals live there too.
 - Crypto (jarvis_crypto): prices, their watch-only wallets, payment links and QR
@@ -582,6 +586,10 @@ const autopilot = AUTOPILOT_ON
   : null
 
 const pipelines = DISABLED.has('pipelines') ? null : createPipelines({ workspace: WORKSPACE })
+// The agency loop: works the Agency leads board on a timer and rings the user.
+const agency = pipelines && !DISABLED.has('agency')
+  ? createAgency({ workspace: WORKSPACE, allowWrites: ALLOW_WRITES, runAgent: (prompt) => runAgent(prompt), pipelines })
+  : null
 // The brain: cloud Claude or a local Ollama model, switchable while running.
 const brain = createBrain({ workspace: WORKSPACE, defaultModel: MODEL, effort: EFFORT })
 
@@ -622,7 +630,6 @@ function creatorServers({ live = true, show = null } = {}) {
             ...opts,
             workspace: WORKSPACE,
             elevenKey,
-            voiceId: process.env.JARVIS_VOICE_ID,
             // Live sessions put every finished video on screen and play it.
             onRendered: show,
           }),
@@ -630,6 +637,8 @@ function creatorServers({ live = true, show = null } = {}) {
       : {}),
     ...(CRYPTO_ON ? { jarvis_crypto: cryptoServer({ ...opts, workspace: WORKSPACE }) } : {}),
     ...(autopilot ? { jarvis_autopilot: autopilot.makeServer() } : {}),
+    // Live sessions only: an agency run must not start another or ring the phone itself.
+    ...(agency && live ? { jarvis_agency: agency.makeServer() } : {}),
     // The laptop. Power tools (sleep, shutdown) only exist in live sessions.
     ...(SYSTEM_ON
       ? {
@@ -644,12 +653,49 @@ function creatorServers({ live = true, show = null } = {}) {
 }
 
 /**
+ * Claude's usage limit. A rejected rate-limit event (or an error that says
+ * "limit") drops JARVIS to the local brain until the reset; restarting the
+ * voice sessions makes the switch take effect. recover() undoes it.
+ */
+const LIMIT_TEXT = /usage limit|hit your limit|limit reached|rate limit/i
+async function claudeLimited(resetsAt) {
+  const switched = await brain.hitLimit(resetsAt)
+  const until = brain.limitedUntil ? new Date(brain.limitedUntil).toLocaleTimeString() : 'later'
+  console.warn(`[jarvis] Claude usage limit reached until ${until}${switched ? ' · switched to the local brain' : ''}`)
+  if (switched) restartSessions(4000)
+}
+const LIMIT_NOTE = () =>
+  `
+Claude's usage limit is reached until ${brain.limitedUntil ? new Date(brain.limitedUntil).toLocaleTimeString() : 'later'}, so you are on the local brain for now and go back to Claude by yourself when it resets. Unattended video and agency runs wait until then. If the user needs heavy thinking meanwhile, say plainly that it will be sharper once Claude is back, and offer to queue it until then. Never suggest or open ChatGPT or any OpenAI product.`
+
+/**
+ * The owner's standing orders: JARVIS's own memory file, read fresh into every
+ * session, live and unattended, so an instruction given once reaches the
+ * autopilot and agency runs too.
+ */
+function standingOrders() {
+  try {
+    const core = readFileSync(join(WORKSPACE, 'memory', 'core.md'), 'utf8').trim()
+    return core ? `
+
+YOUR MEMORY (memory/core.md: the owner's standing orders and facts; follow them and keep the file current):
+${core.slice(0, 8000)}
+` : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
  * A headless JARVIS session for the autopilot: same model, same policy gate,
  * same creator tools and configured MCP servers, but no screen, camera or
  * browser — nobody is watching. The prompt generator stays open until the
  * result arrives, because in-process MCP servers talk over that channel.
  */
 async function runAgent(prompt) {
+  if (brain.limited() || brain.fellBack) {
+    throw new Error(`Claude usage limit reached; unattended runs wait until ${new Date(brain.limitedUntil ?? Date.now()).toLocaleTimeString()}`)
+  }
   let done
   const finished = new Promise((r) => (done = r))
   async function* input() {
@@ -663,12 +709,13 @@ async function runAgent(prompt) {
       systemPrompt:
         'You are JARVIS running unattended as the user\'s content producer. Work through the tools; ' +
         'there is no screen and no listener. Be efficient, follow the brief exactly, and end with one plain line.\n\n' +
-        PROMPT_CREATOR,
+        PROMPT_CREATOR +
+        standingOrders(),
       cwd: WORKSPACE,
-      tools: lean ? [] : builtinTools(ALLOW_WRITES),
+      tools: builtinTools(ALLOW_WRITES),
       hooks: { PreToolUse: [{ hooks: [enforcePolicy] }] },
       settingSources: [],
-      strictMcpConfig: true,
+      strictMcpConfig: !ACCOUNT_CONNECTORS,
       ...brain.options(),
       ...(brain.mode === 'cloud' ? { effort: process.env.JARVIS_AUTOPILOT_EFFORT ?? 'high' } : {}),
       maxTurns: 60,
@@ -682,8 +729,15 @@ async function runAgent(prompt) {
   let result = ''
   try {
     for await (const msg of session) {
+      if (msg.type === 'rate_limit_event' && msg.rate_limit_info?.status === 'rejected') {
+        await claudeLimited(msg.rate_limit_info.resetsAt)
+      }
       if (msg.type === 'result') {
         result = msg.result ?? msg.subtype
+        if (msg.is_error && brain.mode === 'cloud' && LIMIT_TEXT.test(`${msg.result ?? ''} ${JSON.stringify(msg.errors ?? '')}`)) {
+          await claudeLimited()
+          throw new Error('Claude usage limit reached')
+        }
         break
       }
     }
@@ -1431,9 +1485,24 @@ console.log(
       console.log(`[jarvis] studio ${ok ? 'ready (ffmpeg found)' : 'needs ffmpeg — winget install Gyan.FFmpeg'}`),
     )
   }
+  // Back to Claude once a usage limit has reset (checked every minute).
+  const backToClaude = () => {
+    if (brain.recover()) {
+      console.log('[jarvis] Claude usage limit has reset · back on the cloud brain')
+      restartSessions(1000)
+    }
+  }
+  backToClaude()
+  setInterval(backToClaude, 60_000).unref?.()
+  if (brain.fellBack) console.log(`[jarvis] Claude limited until ${new Date(brain.limitedUntil).toLocaleTimeString()} · on the local brain meanwhile`)
   if (autopilot) {
     autopilot.start()
     console.log(`[jarvis] autopilot ${ALLOW_WRITES ? 'publisher running' : 'idle (needs --writes)'}`)
+  }
+  if (agency) {
+    agency.start()
+    const a = agency.settings()
+    console.log(`[jarvis] agency loop ${a.enabled ? `on, every ${a.everyHours} h ${a.from}-${a.to}` : 'off'}${a.ownerPhone ? ` · calls ${a.ownerPhone}` : ''}${agency.readiness().phone ? '' : ' (no phone line: npm run phone:connect)'}`)
   }
   if (pipelines) {
     const s = (b) => pipelines.summary(b).stages.reduce((a, x) => a + x.count, 0)
@@ -1482,6 +1551,11 @@ wss.on('connection', (socket) => {
   let closed = false
   const inbox = []
 
+  // The owner's own clock (Winnipeg). Without it he reads UTC off the machine
+  // and tells the owner it is 3 a.m. when it is 10 p.m.
+  const localClock = () =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Winnipeg', weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date())
+
   async function* userMessages() {
     while (!closed) {
       const text =
@@ -1492,7 +1566,8 @@ wss.on('connection', (socket) => {
       if (closed || text == null) return
       yield {
         type: 'user',
-        message: { role: 'user', content: text },
+        message: { role: 'user', content: `[clock: ${localClock()}]
+${text}` },
         parent_tool_use_id: null,
       }
     }
@@ -1681,7 +1756,7 @@ wss.on('connection', (socket) => {
       // tuned for a coding agent — verbose, file-oriented, and a large chunk
       // of input tokens on every turn. Replacing it makes the persona stick,
       // keeps answers short enough to speak, and cuts cost per turn.
-      systemPrompt: lean ? PROMPT_LOCAL : SYSTEM_PROMPT,
+      systemPrompt: lean ? PROMPT_LOCAL + (brain.fellBack ? LIMIT_NOTE() : '') : SYSTEM_PROMPT + standingOrders(),
       // Run from JARVIS's own workspace rather than the home directory. MCP
       // discovery does not depend on it — settingSources is empty and the
       // servers are passed in explicitly above — and file tools resolve
@@ -1824,6 +1899,12 @@ wss.on('connection', (socket) => {
             break
           }
 
+          case 'rate_limit_event':
+            if (msg.rate_limit_info?.status === 'rejected' && brain.mode === 'cloud') {
+              void claudeLimited(msg.rate_limit_info.resetsAt)
+            }
+            break
+
           case 'result':
             // A result is not automatically a success. The error subtypes
             // carry no `result` field at all, so reporting them as 'done' with
@@ -1848,9 +1929,13 @@ wss.on('connection', (socket) => {
                 `[jarvis] turn failed: ${msg.subtype}`,
                 msg.errors ?? '',
               )
+              const limitHit = brain.mode === 'cloud' && LIMIT_TEXT.test(`${msg.result ?? ''} ${JSON.stringify(msg.errors ?? '')}`)
+              if (limitHit) void claudeLimited()
               sendTurn({
                 type: 'error',
-                message: RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default,
+                message: limitHit
+                  ? 'Claude has hit its usage limit. Switching to the local brain until it resets; one moment.'
+                  : (RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default),
               })
             }
             cancelledAsk = null

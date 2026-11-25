@@ -1,5 +1,7 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 
 /**
  * Which brain JARVIS thinks with, switchable while he runs.
@@ -12,6 +14,10 @@ import { join } from 'node:path'
  *
  * The choice is saved in the workspace so it survives restarts. A change takes
  * effect by restarting each voice session; the page reconnects by itself.
+ *
+ * Usage-limit fallback: when Claude refuses with a usage limit, JARVIS drops to
+ * the local brain on his own and goes back to Claude once the limit resets.
+ * `limitedUntil` records when that is; unattended runs wait for it.
  */
 
 export const CLOUD_MODELS = [
@@ -58,11 +64,30 @@ export function createBrain({ workspace, defaultModel, effort }) {
     }
   }
 
+  /** Start the Ollama app if it is installed but not running; wait up to 30 s. */
+  async function startOllama() {
+    const exe = join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Ollama', 'ollama app.exe')
+    if (process.platform !== 'win32' || !existsSync(exe)) return null
+    try {
+      spawn(exe, [], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+    } catch {
+      return null
+    }
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const m = await localModels()
+      if (m) return m
+    }
+    return null
+  }
+
   /** What the deck and the voice tool see. */
   async function describe() {
     const local = await localModels()
     return {
       mode: state.mode,
+      claudeLimitedUntil: limited() ? new Date(state.limitedUntil).toISOString() : null,
+      automaticFallback: Boolean(state.fellBack),
       model: state.mode === 'local' ? state.local : state.cloud,
       cloud: state.cloud,
       local: state.local,
@@ -117,7 +142,64 @@ export function createBrain({ workspace, defaultModel, effort }) {
     return { model: state.cloud, effort }
   }
 
+  const now = () => Date.now()
+  const limited = () => Boolean(state.limitedUntil && now() < state.limitedUntil)
+
+  /**
+   * Claude said no. Remember until when, and fall back to the local brain if
+   * one is installed. Returns true when the brain actually changed.
+   */
+  async function hitLimit(resetsAt) {
+    let until = Number(resetsAt) || 0
+    if (until && until < 1e12) until *= 1000 // seconds -> ms
+    if (!until || until <= now()) until = now() + 60 * 60e3 // unknown: try again in an hour
+    state = { ...state, limitedUntil: until }
+    let switched = false
+    if (state.mode === 'cloud') {
+      const models = (await localModels()) ?? (await startOllama())
+      const pick = models?.find((m) => m.tools)?.id ?? state.local ?? models?.[0]?.id // quickest tool-capable model first
+      if (models && pick) {
+        state = { ...state, mode: 'local', local: pick, fellBack: true }
+        switched = true
+      }
+    }
+    save()
+    return switched
+  }
+
+  /** Once the limit has reset, go back to Claude. Returns true when it did. */
+  function recover() {
+    if (!state.limitedUntil || now() < state.limitedUntil) return false
+    const back = state.fellBack && state.mode === 'local'
+    const { limitedUntil, fellBack, ...rest } = state
+    state = back ? { ...rest, mode: 'cloud' } : rest
+    save()
+    return Boolean(back)
+  }
+
+  /** A user's own switch ends any automatic fallback. */
+  const userSet = async (a) => {
+    const d = await set(a)
+    if (state.fellBack) {
+      const { fellBack, ...rest } = state
+      state = rest
+      save()
+    }
+    return d
+  }
+
   const label = () => (state.mode === 'local' ? `local · ${state.local}` : `cloud · ${state.cloud}`)
 
-  return { describe, set, options, label, get mode() { return state.mode } }
+  return {
+    describe,
+    set: userSet,
+    options,
+    label,
+    hitLimit,
+    recover,
+    limited,
+    get mode() { return state.mode },
+    get fellBack() { return Boolean(state.fellBack) },
+    get limitedUntil() { return state.limitedUntil ?? null },
+  }
 }

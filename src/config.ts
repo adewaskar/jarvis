@@ -115,6 +115,18 @@ export const TTS_ENGINE: 'kokoro' | 'system' = choice(
 )
 
 /**
+ * HUD layout. `command` is the full Command Center dashboard (panels for
+ * system, tasks, agents, business, CRM, YouTube, voice, activity) around the
+ * reactor; `classic` is the original minimal HUD.
+ */
+export const HUD_LAYOUT: 'command' | 'classic' = choice(
+  'VITE_HUD_LAYOUT',
+  import.meta.env.VITE_HUD_LAYOUT,
+  ['command', 'classic'] as const,
+  'command',
+)
+
+/**
  * Which Kokoro voice. All four are British male:
  *   bm_george — measured RP baritone, closest to the character
  *   bm_fable  — warmer

@@ -12,7 +12,7 @@ import './deck.css'
  * rather than showing a made-up number.
  */
 
-type Snapshot = {
+export type Snapshot = {
   at: string
   core: { model: string; effort: string; writes: boolean }
   system: {
@@ -28,11 +28,15 @@ type Snapshot = {
   pipelines: { board: string; title: string; stages: { stage: string; label: string; approval: boolean; count: number }[] }[]
   autopilot: { enabled: boolean; niche: string | null; times: string[]; queued: number; recent: { title: string; at: string | null; platforms: string[]; status: string }[] }
   crypto: { symbol: string; usd: number | null; change24h: number | null }[]
+  weather?: { place: string; tempC: number | null; code: number | null; day: boolean } | null
+  security?: { ok: boolean | null; issues: string[]; antivirus?: string[]; checked: string } | null
+  activity?: { time: string; text: string }[]
+  agents?: { name: string; state: 'on' | 'off' | 'paused'; detail: string }[]
 }
 
 const POLL_MS = 4000
 
-function useDeck() {
+export function useDeck() {
   const [data, setData] = useState<Snapshot | null>(null)
   const [down, setDown] = useState(false)
   const cpuHist = useRef<number[]>([])
@@ -70,7 +74,7 @@ function useClock() {
   return now
 }
 
-const compact = (n: number | null | undefined) =>
+export const compact = (n: number | null | undefined) =>
   n == null ? '—' : Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 
 /* ------------------------------------------------------------- primitives */
@@ -158,7 +162,7 @@ function Spark({ points }: { points: number[] }) {
 }
 
 /** A slowly turning wireframe globe with pings for each linked platform. */
-function Globe({ pings }: { pings: number }) {
+export function Globe({ pings }: { pings: number }) {
   const [rot, setRot] = useState(0)
   useEffect(() => {
     let raf = 0
@@ -229,7 +233,7 @@ type Brain = {
  * Cloud or local, switched in place. The bridge saves the choice and restarts
  * the voice session; the page reconnects on its own, so nothing to reload.
  */
-function BrainSwitch() {
+export function BrainSwitch() {
   const [b, setB] = useState<Brain | null>(null)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')

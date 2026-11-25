@@ -560,6 +560,38 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
 
+  // -- typed commands from the Command Center -----------------------------
+  // The dashboard's input, quick buttons and nav fire `jarvis:command`. A typed
+  // order works even while he is dormant (typing is as clear as a wake word),
+  // and cuts off whatever he was saying, like speaking over him does.
+  const typed = useRef<(text: string) => void>(() => {})
+  typed.current = (text: string) => {
+    const s = store.getState()
+    if (s.phase === 'offline' || s.phase === 'boot') {
+      s.setError('JARVIS is still offline. Power him on first.')
+      return
+    }
+    const wasBusy = s.phase === 'thinking' || s.phase === 'tooling' || s.phase === 'speaking'
+    silence()
+    if (wasBusy) {
+      turn.current++
+      interrupt()
+      s.setActiveTool(null)
+      music.working(false)
+      sfx.duck(false)
+      music.duck(false)
+    }
+    void respond(text)
+  }
+  useEffect(() => {
+    const on = (e: Event) => {
+      const text = String((e as CustomEvent).detail ?? '').trim()
+      if (text) typed.current(text)
+    }
+    window.addEventListener('jarvis:command', on)
+    return () => window.removeEventListener('jarvis:command', on)
+  }, [])
+
   // -- level pump + keys ----------------------------------------------------
 
   useEffect(() => {

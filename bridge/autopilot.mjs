@@ -74,7 +74,7 @@ export function createAutopilot({ workspace, allowWrites, checkPath, publishers,
   const queue = () => db.read('queue', [])
 
   function postedToday(platform) {
-    return queue().filter((q) => q.results?.[platform]?.ok && q.results[platform].at?.startsWith(today())).length
+    return queue().filter((q) => q.results?.[platform]?.ok && q.results[platform].at && new Date(q.results[platform].at).toLocaleDateString('en-CA') === today()).length
   }
 
   let publishing = false
@@ -91,7 +91,8 @@ export function createAutopilot({ workspace, allowWrites, checkPath, publishers,
           if (item.results[platform]?.ok) continue
           if ((item.results[platform]?.attempts ?? 0) >= 3) continue
           if (!publishers[platform]) {
-            item.results[platform] = { ok: false, error: `${platform} is not connected`, attempts: 3 }
+            // Not a failure: the video waits and posts once the platform is connected.
+            item.results[platform] = { ok: false, error: `${platform} is not connected yet; it will post once it is`, attempts: 0 }
             continue
           }
           if (postedToday(platform) >= cap) continue // waits for tomorrow
@@ -159,8 +160,9 @@ Steps:
    what is trending in the niche (search_youtube). Pick an angle that has not been done in the
    last 10 queued posts (list_queue).
 2. Write a 20–45 second script with a hook in the first two seconds.
-3. Build it with the studio tools (create_voiceover, image generation from any available
-   generation server, render_short) — or render_clip for footage.
+3. Build it with the studio tools: create_image for each scene (4-8 scenes, consistent style),
+   create_voiceover if a voice key is set (otherwise captionText), then render_short; or
+   render_clip for footage.
 4. Queue it with create_scheduled_post for all platforms at the next free slot, with a
    platform-appropriate caption and 3–6 relevant hashtags. YouTube title under 70 characters.
    Mark brandOrganic if it promotes the user's own product.

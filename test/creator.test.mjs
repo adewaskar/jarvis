@@ -16,15 +16,17 @@ const READS = {
   jarvis_autopilot: ['get_autopilot_settings', 'list_queue', 'list_products', 'list_brand_deals'],
   jarvis_pipelines: ['list_pipeline', 'get_pipeline_card'],
   jarvis_system: ['get_system_status', 'list_running_apps'],
+  jarvis_agency: ['get_agency_settings'],
 }
 const WRITES = {
   jarvis_tiktok: ['upload_tiktok_video'],
   jarvis_instagram: ['upload_instagram_reel', 'post_instagram_comment_reply'],
-  jarvis_studio: ['create_voiceover', 'create_captions', 'render_short', 'render_clip'],
+  jarvis_studio: ['create_image', 'create_voiceover', 'create_captions', 'render_short', 'render_clip'],
   jarvis_crypto: ['create_nft_package'],
   jarvis_autopilot: ['update_autopilot_settings', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
   jarvis_pipelines: ['create_pipeline_card', 'update_pipeline_card', 'delete_pipeline_card'],
   jarvis_system: ['launch_app', 'launch_link', 'close_app', 'set_volume', 'lock_computer', 'sleep_computer', 'schedule_shutdown', 'cancel_shutdown'],
+  jarvis_agency: ['update_agency_settings', 'launch_agency_run', 'call_owner'],
 }
 
 test('creator reads run in read-only mode', () => {
@@ -102,7 +104,8 @@ test('autopilot publishes due posts and respects the daily cap', async () => {
   await ap.publishDue()
   assert.deepEqual(posted, ['v1', 'v2'])
   const q = JSON.parse(readFileSync(join(ws, 'autopilot', 'queue.json'), 'utf8'))
-  assert.equal(q[0].results.instagram.error, 'instagram is not connected')
+  assert.match(q[0].results.instagram.error, /not connected yet/)
+  assert.notEqual(q[0].status, 'done', 'waits for instagram instead of giving up')
   assert.equal(q[2].results.tiktok, undefined, 'third waits for tomorrow')
   // Turning it on needs a niche.
   assert.equal((await call(srv, 'update_autopilot_settings', { enabled: true })).error, true)

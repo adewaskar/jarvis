@@ -86,6 +86,50 @@ channel and add them to the YouTube board."*
 To contact leads, JARVIS needs a mail tool. Connect a Gmail MCP server in
 `~/.claude.json`, or set `JARVIS_ACCOUNT_CONNECTORS=1`.
 
+## Agency loop
+
+Try saying: *"Run the agency every 2 hours from 8 to 8. Towns: Winnipeg,
+Brandon. Niches: plumbers, salons. Call me at 204 555 0100 when leads are
+waiting."*
+
+Every few hours inside the working window, an unattended JARVIS run works the
+Agency leads board, following the design in `~/.jarvis/workspace/agency-system.md`:
+
+1. **Scout**: searches Google for local businesses in your towns and niches.
+   Businesses with no website come first.
+2. **Auditor**: scores each one and keeps those with a public email or phone.
+3. **Call sheet**: for each scored lead, writes `projects/agency/calls/<slug>.md`
+   for **you** to make the call: opener, likely objections, which package fits,
+   and the close. JARVIS does not make sales calls itself. In Canada, the CRTC
+   bans automated or AI-voice sales calls without the business's consent.
+4. **Builder**: builds a one-page demo for each lead, so you have it ready if
+   they ask what it would look like. It goes live on Netlify only after you
+   approve the lead, and only if `NETLIFY_AUTH_TOKEN` is set.
+5. **Copywriter**, **Sender**: write the emails, then send them after you
+   approve. Writing them needs an offer, a sender and a business address;
+   sending also needs a mail tool.
+
+The run stops at your two approval stages, every time. When it finishes, JARVIS
+rings your phone if leads or pitches are waiting. Without a phone line it shows
+a Windows notification instead. Say *"launch an agency run now"* to start one
+straight away. The log is in `projects/agency/runs.log`.
+
+**Phone line (Twilio).** A free trial works:
+
+1. Sign up at <https://console.twilio.com> and get a trial phone number.
+2. Under Phone Numbers > Verified Caller IDs, verify your own mobile. A trial can
+   only call verified numbers.
+3. Run `npm run phone:connect` and paste the Account SID, Auth Token and Twilio
+   number.
+4. Restart JARVIS and say *"call me to test the phone line"*.
+
+Trial calls start with a short Twilio notice until you upgrade.
+
+**Standing orders.** What you tell JARVIS to always do is kept in
+`~/.jarvis/workspace/memory/core.md`. That file is read into every session,
+including unattended runs, so an order you give once applies to the autopilot
+and the agency loop as well.
+
 ## Selling
 
 - **Your products and affiliate links**: *"Add my preset pack, $15, link
@@ -147,6 +191,16 @@ two user environment variables. Keep them:
 ```
 
 Quit and reopen the Ollama app after changing them.
+
+**When Claude hits its usage limit**, JARVIS switches to the local brain by
+himself, starting Ollama first if it isn't running. He goes back to Claude when
+the limit resets. He uses the reset time Claude reports, or tries again after an
+hour. Video and agency runs wait until Claude is back: they need the full
+toolset. Choosing a brain yourself ends the automatic fallback.
+
+**Account connectors** such as Wix and Higgsfield need
+`JARVIS_ACCOUNT_CONNECTORS=1`. It's saved as a user environment variable on this
+PC.
 
 ## Laptop control
 
