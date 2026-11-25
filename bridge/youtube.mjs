@@ -125,6 +125,20 @@ export async function youtubeUpload(path, { title, description = '', tags, categ
   }
 }
 
+/** Set a video's custom thumbnail (JPG/PNG under 2 MB). Needs a verified channel. */
+export async function youtubeSetThumbnail(videoId, path) {
+  const mime = IMAGE_MIME[extname(path).toLowerCase()]
+  if (!mime) throw new Error('Thumbnails must be JPG or PNG.')
+  const res = await fetch(`https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${await accessToken()}`, 'content-type': mime },
+    body: await readFile(path),
+  })
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(`YouTube refused the thumbnail: ${out?.error?.message ?? res.status}`)
+  return true
+}
+
 /**
  * @param {{ allowWrites: boolean, checkPath: (p: string) => string | null }} opts
  *   checkPath returns why a local file may not be used, or null — the same

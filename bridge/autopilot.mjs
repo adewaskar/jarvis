@@ -5,6 +5,29 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { safe } from './secrets.mjs'
 import { ACCOUNT_RE, accountKey, withAccount } from './accounts.mjs'
+import { MOODS, STYLES as FILM_STYLES } from './films.mjs'
+
+/** A film channel's fixed look: same art style, character and sign-off on every film. */
+const filmSettings = z
+  .object({
+    style: z.enum(FILM_STYLES),
+    music: z.enum(MOODS).optional(),
+    watermark: z.string().max(30).optional(),
+    voice: z.string().regex(/^[abefhijpz][fm]_[a-z]+$/).optional(),
+    hero: z
+      .object({
+        skin: z.string().max(20).optional(),
+        hair: z.string().max(20).optional(),
+        hairStyle: z.enum(['short', 'long', 'bald', 'cap', 'bun', 'spiky']).optional(),
+        outfit: z.string().max(20).optional(),
+        pants: z.string().max(20).optional(),
+        accent: z.string().max(20).optional(),
+      })
+      .optional(),
+    minutes: z.number().min(1).max(10).optional(),
+  })
+  .optional()
+  .describe('For style "films": the art style, the hero character, music mood, watermark (channel name) and target length in minutes')
 
 /**
  * The autopilot: JARVIS running the channels while nobody is talking to him.
@@ -78,6 +101,7 @@ export function channelList(s) {
       review: Boolean(s.review),
       feedback: s.feedback ?? [],
       ...pick(s, IDENTITY),
+      ...(s.film ? { film: s.film } : {}),
       accounts: {},
     },
   ]
@@ -232,6 +256,7 @@ export function createAutopilot({ workspace, allowWrites, checkPath, publishers,
   }
 
   function brief(c) {
+    if (c.style === 'films') return filmBrief(c)
     const products = db.read('products', []).filter((p) => p.active !== false)
     const named = c.id !== 'main'
     const recent = queue()
@@ -275,6 +300,72 @@ STEPS
 8. Finish with one line: what you made and when it will post.
 
 Never post directly — only queue. Never use copyrighted music or footage you were not given.`
+  }
+
+  /** The faceless animated-story format: a researched true story, told scene by scene, drawn by make_film. */
+  function filmBrief(c) {
+    const named = c.id !== 'main'
+    const f = c.film ?? {}
+    const minutes = f.minutes ?? 2.5
+    const voice = f.voice ?? c.voice
+    const recent = queue()
+      .filter((q) => (q.channel ?? 'main') === c.id && q.status !== 'cancelled')
+      .slice(-20)
+      .map((q) => `- ${q.title}`)
+    const disliked = (c.feedback ?? []).filter((x) => x.kind === 'rejected').slice(-6)
+    const liked = (c.feedback ?? []).filter((x) => x.kind === 'approved' && x.note).slice(-5)
+    const others = (c.platforms ?? []).filter((p) => p !== 'youtube')
+    const yt = (c.platforms ?? []).includes('youtube')
+    const line = (label, v) => (v ? `${label}: ${v}\n` : '')
+    const queueStep = [
+      yt ? "the 16:9 film for youtube only, with thumbnail set to the film's thumbnail" : '',
+      others.length ? `the 9:16 cut for ${others.join(', ')}` : '',
+    ]
+      .filter(Boolean)
+      .join('; ')
+    let n = 5
+    const step = () => ++n
+    return `AUTOPILOT RUN — nobody is listening; do not speak, just work.
+
+Make ONE animated story film for the ${named ? `"${c.id}" channel` : "user's channel"} and queue it. This is the
+faceless animated-channel format: a channel character, one art style, a true story told well. One
+film a viewer finishes beats five they skip. If you cannot make it good today, queue nothing and say why.
+
+THE CHANNEL
+${line('Niche', c.niche)}${line('Made for', c.audience)}${line('Recurring format', c.format)}Art style (make_film style, the same on EVERY film): ${f.style ?? 'paper-cutout'}
+Hero character (make_film hero, never change it): ${JSON.stringify(f.hero ?? {})}
+Watermark: ${f.watermark ?? c.id}
+Music mood: ${f.music ?? 'pick the mood that fits this story'}
+${line('Narrator voice', voice)}${line('Sign-off / call to action', c.callToAction)}Platforms: ${(c.platforms ?? []).join(', ')}
+${c.instructions ? `Standing instructions from the user: ${c.instructions}\n` : ''}${recent.length ? `\nAlready made (do NOT repeat these stories):\n${recent.join('\n')}\n` : ''}${liked.length ? `\nThe owner liked: ${liked.map((x) => x.note).join(' | ')}\n` : ''}${disliked.length ? `The owner turned these down, avoid the same mistakes: ${disliked.map((x) => `"${x.title}"${x.note ? ` (${x.note})` : ''}`).join(' | ')}\n` : ''}
+STEPS
+1. Demand first. search_youtube the niche and find OUTLIERS: videos with far more views than their
+   channel has subscribers (a 3,000-subscriber channel with a 1M-view video). That proves people want
+   the topic. Pick ONE specific story in that space this channel has not told. Never copy another
+   channel's script, characters or art: same topic area, your own story, your own telling.
+2. Research it from reliable sources (web search). Keep only facts you can back up; a true story stays
+   true, invented details are not allowed. Note the 3-5 most surprising facts and any striking numbers.
+3. Write it as ${Math.round(minutes * 12)}-${Math.round(minutes * 16)} scenes, ${Math.round(minutes * 140)}-${Math.round(minutes * 165)} words of narration (about ${minutes} minutes):
+   - Scene 1: the hook, the most impossible fact or question, with a title card. No intro, no channel name.
+   - Escalate: each scene adds something new; a turn or twist by the middle; a payoff near the end;
+     a last line that makes the viewer think${c.callToAction ? ', then the sign-off' : ''}.
+   - Each scene is one beat: 1-2 short sentences for the ear, plus what we SEE: a setting that fits,
+     the hero's pose and expression acting out the line, 1-3 props that show what is said, a camera
+     move on strong beats (push-in for tension, shake for shocks), big-number for any striking number
+     (dates, days, money, distances), a transition between places. Something moves or appears every
+     few seconds; vary settings and poses so no two scenes in a row look the same.
+4. Reread it as a strict editor: is the hook strong, does every scene earn its place, is every fact
+   backed up, does it flow when read aloud? Rewrite once.
+5. make_film with that style, hero and watermark, aspect 16:9, the music mood${voice ? `, voice "${voice}"` : ''}. It takes a few
+   minutes. Check it is ${Math.max(1, minutes - 1)}-${minutes + 1.5} minutes long and has sound (get_media_info).
+${others.length ? `${step()}. For ${others.join(', ')}: make a second, 9:16 cut of the same story: its best 30-50 seconds as 8-12
+   scenes (make_film, aspect 9:16, same style and hero), ending on a cliffhanger${yt ? ' and "full story on our channel"' : ''}.
+` : ''}${step()}. Queue with create_scheduled_post${named ? ` (channel: "${c.id}")` : ''}: ${queueStep}.
+   Title: the story's hook as a question or a promise, honest, under 70 characters. Description: two
+   lines on what the story is, then 3-5 specific hashtags.${c.review ? '\n   This channel holds every film for the owner to approve first; it will not post until they do.' : ''}
+${step()}. Finish with one line: what you made and when it will post.
+
+Never post directly — only queue. Never use music, footage or art you were not given or did not make.`
   }
 
   let timer = null
@@ -333,13 +424,15 @@ Never post directly — only queue. Never use copyrighted music or footage you w
   const writes = [
     tool(
       'update_autopilot_settings',
-      `Turn the autopilot on or off and set what it makes: niche, style (ai-shorts, clips, both),
+      `Turn the autopilot on or off and set what it makes: niche, style (ai-shorts, clips, both, or films:
+2-3 minute animated story films with the channel's own character, see jarvis_films),
 platforms, local times to create a video (HH:MM, 24h), posts per platform per day (max ${HARD_CAP}),
 and any standing instructions (tone, topics to avoid, call to action).`,
       {
         enabled: z.boolean().optional(),
         niche: z.string().max(300).optional(),
-        style: z.enum(['ai-shorts', 'clips', 'both']).optional(),
+        style: z.enum(['ai-shorts', 'clips', 'both', 'films']).optional(),
+        film: filmSettings,
         platforms: z.array(z.enum(PLATFORMS)).optional(),
         times: z.array(z.string().regex(/^\d\d:\d\d$/)).max(10).optional(),
         postsPerDayPerPlatform: z.number().int().min(1).max(HARD_CAP).optional(),
@@ -374,7 +467,8 @@ Each channel needs a different niche: near-identical channels get flagged as mas
         remove: z.boolean().optional(),
         enabled: z.boolean().optional(),
         niche: z.string().min(3).max(300).optional(),
-        style: z.enum(['ai-shorts', 'clips', 'both']).optional(),
+        style: z.enum(['ai-shorts', 'clips', 'both', 'films']).optional(),
+        film: filmSettings,
         platforms: z.array(z.enum(PLATFORMS)).min(1).optional(),
         times: z.array(z.string().regex(/^\d\d:\d\d$/)).max(10).optional(),
         postsPerDayPerPlatform: z.number().int().min(1).max(HARD_CAP).optional(),
@@ -436,12 +530,13 @@ The publisher posts it automatically and respects the daily caps.`,
           })
           .optional(),
         tags: z.array(z.string()).max(30).optional(),
+        thumbnail: z.string().optional().describe('YouTube thumbnail image (JPG/PNG), e.g. the one make_film returns'),
         youtubePrivacy: z.enum(['public', 'unlisted', 'private']).optional(),
         brandOrganic: z.boolean().optional(),
         brandContent: z.boolean().optional(),
       },
       safe(async (p) => {
-        const problem = checkPath(p.video)
+        const problem = checkPath(p.video) ?? (p.thumbnail ? checkPath(p.thumbnail) : null)
         if (problem) throw new Error(problem)
         if (!existsSync(p.video)) throw new Error('That video file does not exist.')
         const at = p.at ? new Date(p.at) : new Date()
@@ -459,9 +554,13 @@ The publisher posts it automatically and respects the daily caps.`,
         if (probe) {
           const m = await probe(p.video).catch(() => null)
           if (!m) throw new Error('Could not read that video file; render it again.')
-          if (m.duration < 8 || m.duration > 180) throw new Error(`The video is ${m.duration.toFixed(0)} s long; shorts need 8-180 s (aim for 25-50).`)
-          if (!m.hasAudio) throw new Error('The video has no sound. Add the narration (create_voiceover) and render again.')
-          if (m.width && m.height && m.height < m.width) throw new Error('The video is not vertical; render it at 1080x1920.')
+          const wide = m.width && m.height && m.height < m.width
+          if (!m.hasAudio) throw new Error('The video has no sound. Add the narration and render again.')
+          if (wide) {
+            // A regular (16:9) YouTube video: only YouTube takes those; the others need a vertical cut.
+            if (p.platforms.some((x) => x !== 'youtube')) throw new Error('A 16:9 video can only go to YouTube. Make a 9:16 cut for the other platforms and queue it separately.')
+            if (m.duration < 30 || m.duration > 900) throw new Error(`The video is ${m.duration.toFixed(0)} s long; a YouTube video here needs 30 s to 15 minutes.`)
+          } else if (m.duration < 8 || m.duration > 180) throw new Error(`The video is ${m.duration.toFixed(0)} s long; shorts need 8-180 s (aim for 25-50).`)
         }
         const status = channel.review ? 'review' : 'queued'
         const item = { id: randomUUID().slice(0, 8), status, created: new Date().toISOString(), ...p, at: at.toISOString(), results: {} }
@@ -592,5 +691,11 @@ The publisher posts it automatically and respects the daily caps.`,
     tools: allowWrites ? [...reads, ...writes, ...(live ? approvals : [])] : reads,
   })
 
-  return { makeServer, start, publishDue }
+  /** The brief a channel's next run would get (for tests and "what will you make next?"). */
+  const briefFor = (id) => {
+    const c = channelOf(settings(), id)
+    return c ? brief(c) : null
+  }
+
+  return { makeServer, start, publishDue, briefFor }
 }

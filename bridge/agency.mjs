@@ -43,8 +43,12 @@ const DEFAULTS = {
   depositPercent: 50,
   revisionRounds: 2,
   careFee: '', // e.g. "$29 a month"
+  // Meetings: a booking page the owner made (Google Calendar appointment schedule, Calendly, Cal.com).
+  bookingLink: '',
+  meetingMinutes: 15,
+  autoBook: true, // send the booking link straight back when a business asks to meet
   lastRun: null,
-  lastNotified: { scored: 0, demo_ready: 0 },
+  lastNotified: { scored: 0, demo_ready: 0, replied: 0, meeting: 0 },
 }
 
 const hhmm = () => new Date().toTimeString().slice(0, 5)
@@ -72,7 +76,7 @@ export function createAgency({ workspace, allowWrites, runAgent, pipelines }) {
   const gateCounts = () => {
     const st = pipelines?.summary('agency')?.stages ?? []
     const n = (k) => st.find((x) => x.stage === k)?.count ?? 0
-    return { scored: n('scored'), demo_ready: n('demo_ready') }
+    return { scored: n('scored'), demo_ready: n('demo_ready'), replied: n('replied'), meeting: n('meeting') }
   }
 
   /** What is configured, and so which agents can run. */
@@ -102,6 +106,7 @@ Settings:
 - Offer / price sheet: ${s.offer || 'NOT SET'}
 - Sender: ${s.senderName || 'NOT SET'} <${s.senderEmail || 'not set'}> · Address: ${s.businessAddress || 'NOT SET'}
 - Payment link: ${s.paymentLink || 'NOT SET'}
+- Booking link for meetings (${s.meetingMinutes} min): ${s.bookingLink || 'NOT SET'}${s.bookingLink && s.autoBook ? ' (send it straight back to anyone who asks to meet)' : ''}
 - Demo hosting (Netlify token in NETLIFY_AUTH_TOKEN): ${r.hosting ? 'ready' : 'NOT SET'}
 - Client paperwork (agency name, address, email, governing law): ${r.documents ? 'ready' : 'NOT SET'}
 
@@ -115,8 +120,13 @@ Do, in order, only what the settings allow:
    b. The page (index.html): hero with the business name, one clear line about what they do and where, and a call/book button with their real phone; services; why choose them (only facts you found); hours, area served and a map link; contact. Real facts only: no invented prices, reviews, awards, staff or years in business. Clean typography, strong contrast, fast (no frameworks).
    c. Footer: the short demo notice from prepare_client_documents (stage "before"), so the business can see who made it and how to have it removed.
    Put demoPath on the card so the owner can show it on a call. ${r.hosting ? 'Only for cards in approved_lead, deploy it with `npx --yes netlify-cli deploy --prod --dir <folder> --site <slug>-demo` (create the site first if needed) and put the live URL in demoUrl.' : 'Hosting is not set up: leave the card where it is with the note "demo built locally, waiting for hosting".'} Check it like the Critic: correct name, phone, hours, no placeholder text, works on mobile.
-6. COPYWRITER${r.copywriter ? '' : ' (skip: offer, sender or address not set)'}: for cards with a live demoUrl, run prepare_client_documents (stage "before") with the card's facts, so the proposal and terms, the full demo notice and the outreach privacy notice exist. Then write the subject, first email (under 120 words), follow-up 1 (day 3) and follow-up 2 (day 7), with the sender's name, the business address, an opt-out line and the demo notice. Save them and the documents folder (documentsBefore) on the card and move it to "demo_ready". If prepare_client_documents reports anything missing, say what in the card note and do not move it. STOP at APPROVED TO SEND.
-7. SENDER and CLOSER: only if a mail tool is connected in this session. Send exactly what was approved for cards in "approved_to_send". If there is no mail tool, do nothing here.
+6. COPYWRITER${r.copywriter ? '' : ' (skip: offer, sender or address not set)'}: for cards with a live demoUrl, run prepare_client_documents (stage "before") with the card's facts, so the proposal and terms, the full demo notice and the outreach privacy notice exist. Then write the subject, first email (under 120 words), follow-up 1 (day 3) and follow-up 2 (day 7), with the sender's name, the business address, an opt-out line and the demo notice${s.bookingLink ? `, and one clear next step: "Book a ${s.meetingMinutes}-minute look at your demo: ${s.bookingLink}"` : ''}. Save them and the documents folder (documentsBefore) on the card and move it to "demo_ready". If prepare_client_documents reports anything missing, say what in the card note and do not move it. STOP at APPROVED TO SEND.
+7. SENDER and CLOSER: only if a mail tool is connected in this session. Send exactly what was approved for cards in "approved_to_send", then move each to "contacted" with the date. Follow-ups go out on their day (3 and 7) only if the business has not replied. If there is no mail tool, do nothing here.
+   INBOX: for every card in "contacted", search the inbox for replies from that business (its email address or name, since the pitch went out) and sort each one:
+   - Stop, unsubscribe, not interested, wrong person: move to "lost" with the reason and "do not contact" on the card. Never write to them again. Opt-outs are honoured at once (CASL).
+   - Wants to meet, asks for a call or a time: ${s.bookingLink && s.autoBook ? `reply in the same thread (under 60 words, warm, the sender's name, the business address and an opt-out line) with the booking link ${s.bookingLink} for a ${s.meetingMinutes}-minute call, and move the card to "meeting" with the note "booking link sent". If they name a time and a calendar tool is connected, check the owner's calendar: when that time is free and inside ${s.from}-${s.to}, put a ${s.meetingMinutes}-minute event on it for the owner, confirm that time instead, and note it.` : `write a short reply offering two times inside ${s.from}-${s.to} on the next working days (check the owner's calendar if a calendar tool is connected), save it on the card as replyDraft, and move the card to "replied" for the owner to send. Do not send it yourself.`}
+   - A question (price, what is included, how long): answer only from the offer sheet as replyDraft on the card and move it to "replied" for the owner. Never offer a discount, a price below the sheet, a deadline or terms; that is the owner's call.
+   - A booking confirmation from the booking page: move the card to "meeting" with the date and time.
 8. AFTER SIGNING: for every card in "won" without documentsAfter, run prepare_client_documents (stage "after", with the card id and the agreed package, price, domain and contact). Put documentsAfter on the card and note what the owner must do: get the service agreement signed and the deposit paid, then work through launch-checklist.md. You never sign, e-sign or accept terms for anyone. Copy privacy.html and terms.html into the client's site folder and link them in the footer only after the owner confirms the agreement is signed.
 9. Log one line per action to ${logFile}.
 
@@ -126,7 +136,8 @@ Finish with exactly one line starting "SUMMARY:" saying what moved and what is w
   async function notify(summary, force = false) {
     const s = settings()
     const counts = gateCounts()
-    const fresh = counts.scored > (s.lastNotified?.scored ?? 0) || counts.demo_ready > (s.lastNotified?.demo_ready ?? 0)
+    const was = s.lastNotified ?? {}
+    const fresh = ['scored', 'demo_ready', 'replied', 'meeting'].some((k) => counts[k] > (was[k] ?? 0))
     const want = force || s.call === 'every-run' || (s.call === 'new-approvals' && fresh)
     s.lastNotified = counts
     save(s)
@@ -134,6 +145,8 @@ Finish with exactly one line starting "SUMMARY:" saying what moved and what is w
     const waiting = []
     if (counts.scored) waiting.push(`${counts.scored} new lead${counts.scored === 1 ? '' : 's'} to call or approve`)
     if (counts.demo_ready) waiting.push(`${counts.demo_ready} pitch${counts.demo_ready === 1 ? '' : 'es'} ready to send`)
+    if (counts.replied) waiting.push(`${counts.replied} repl${counts.replied === 1 ? 'y' : 'ies'} to answer`)
+    if (counts.meeting) waiting.push(`${counts.meeting} meeting${counts.meeting === 1 ? '' : 's'} booked or waiting to book`)
     const say = `Hello, this is Jarvis. The agency run is finished. ${waiting.length ? `You have ${waiting.join(' and ')}. Open the board when you can.` : 'Nothing needs you right now.'} Goodbye.`
     if (readiness(s).phone) {
       try {
@@ -210,7 +223,7 @@ Finish with exactly one line starting "SUMMARY:" saying what moved and what is w
   const writes = [
     tool(
       'update_agency_settings',
-      'Turn the agency loop on or off and set: everyHours, working window (from/to HH:MM), country, towns, niches, leadsPerRun, offer (packages, prices, hosting fee, max discount, turnaround), senderName, senderEmail, businessAddress, paymentLink, ownerPhone, call (new-approvals, every-run or never), and the paperwork terms: agencyName, governingLaw (e.g. "the Province of Manitoba and the federal laws of Canada that apply there"), depositPercent, revisionRounds, careFee.',
+      'Turn the agency loop on or off and set: everyHours, working window (from/to HH:MM), country, towns, niches, leadsPerRun, offer (packages, prices, hosting fee, max discount, turnaround), senderName, senderEmail, businessAddress, paymentLink, ownerPhone, call (new-approvals, every-run or never), bookingLink (the owner booking page), meetingMinutes, autoBook (send the booking link straight back when a business asks to meet), and the paperwork terms: agencyName, governingLaw (e.g. "the Province of Manitoba and the federal laws of Canada that apply there"), depositPercent, revisionRounds, careFee.',
       {
         enabled: z.boolean().optional(),
         everyHours: z.number().min(1).max(24).optional(),
@@ -227,6 +240,9 @@ Finish with exactly one line starting "SUMMARY:" saying what moved and what is w
         paymentLink: z.string().max(500).optional(),
         ownerPhone: z.string().max(30).optional(),
         call: z.enum(['new-approvals', 'every-run', 'never']).optional(),
+        bookingLink: z.string().url().max(300).optional().or(z.literal('')),
+        meetingMinutes: z.number().int().min(10).max(90).optional(),
+        autoBook: z.boolean().optional(),
         agencyName: z.string().max(120).optional(),
         governingLaw: z.string().max(200).optional(),
         depositPercent: z.number().int().min(0).max(100).optional(),

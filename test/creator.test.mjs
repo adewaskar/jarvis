@@ -15,6 +15,7 @@ const READS = {
   jarvis_tiktok: ['get_tiktok_profile', 'list_tiktok_videos', 'get_tiktok_creator_settings', 'check_tiktok_progress'],
   jarvis_instagram: ['get_instagram_profile', 'list_instagram_media', 'get_instagram_insights', 'list_instagram_comments'],
   jarvis_studio: ['get_media_info', 'list_studio_videos', 'show_video'],
+  jarvis_films: [],
   jarvis_facebook: ['get_facebook_page'],
   jarvis_crypto: ['get_crypto_prices', 'get_crypto_chart', 'get_wallet_balances', 'list_wallet_transactions', 'get_crypto_invoice'],
   jarvis_autopilot: ['get_autopilot_settings', 'list_queue', 'list_products', 'list_brand_deals'],
@@ -27,6 +28,7 @@ const WRITES = {
   jarvis_instagram: ['upload_instagram_reel', 'post_instagram_comment_reply'],
   jarvis_studio: ['create_image', 'create_voiceover', 'create_captions', 'render_short', 'render_clip'],
   jarvis_crypto: ['create_nft_package'],
+  jarvis_films: ['make_film'],
   jarvis_autopilot: ['update_autopilot_settings', 'update_autopilot_channel', 'approve_scheduled_post', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
   jarvis_pipelines: ['create_pipeline_card', 'update_pipeline_card', 'delete_pipeline_card'],
   jarvis_system: ['launch_app', 'launch_link', 'close_app', 'set_volume', 'lock_computer', 'sleep_computer', 'schedule_shutdown', 'cancel_shutdown'],
@@ -212,8 +214,11 @@ test('new channels hold videos for review, refuse repeats and learn from feedbac
   assert.match((await call(headless, 'create_scheduled_post', { video, title: 'Octopuses taste with their arms - why?', channel: 'ocean', platforms: ['youtube'] })).data, /Too close/)
   media = { duration: 30, width: 1080, height: 1920, hasAudio: false }
   assert.match((await call(headless, 'create_scheduled_post', { video, title: 'The fish that walks', channel: 'ocean', platforms: ['youtube'] })).data, /no sound/)
-  media = { duration: 30, width: 1920, height: 1080, hasAudio: true }
-  assert.match((await call(headless, 'create_scheduled_post', { video, title: 'The fish that walks', channel: 'ocean', platforms: ['youtube'] })).data, /not vertical/)
+  // A 16:9 film is a regular YouTube video: YouTube only, 30 s to 15 min.
+  media = { duration: 150, width: 1920, height: 1080, hasAudio: true }
+  assert.match((await call(headless, 'create_scheduled_post', { video, title: 'The fish that walks', channel: 'ocean', platforms: ['youtube', 'tiktok'] })).data, /only go to YouTube/)
+  media = { duration: 20, width: 1920, height: 1080, hasAudio: true }
+  assert.match((await call(headless, 'create_scheduled_post', { video, title: 'The fish that walks', channel: 'ocean', platforms: ['youtube'] })).data, /30 s to 15 minutes/)
   media = { duration: 30, width: 1080, height: 1920, hasAudio: true }
 
   // The owner approves one and turns one down with a reason.
@@ -279,4 +284,102 @@ test('templates and markdown helpers', () => {
   const html = mdToHtml(['# T', '', 'A **b** <i> [p](privacy.html) [x](javascript:alert(1))', '', '- one'].join('\n'), 'T')
   assert.match(html, /<strong>b<\/strong> &lt;i&gt; <a href="privacy.html">p<\/a> x/)
   assert.match(html, /<li>one<\/li>/)
+})
+
+test('film lists match the renderer, and every action gets a sound', async () => {
+  const films = await import('../bridge/films.mjs')
+  const types = readFileSync(new URL('../films/src/types.ts', import.meta.url), 'utf8')
+  const list = (name) => {
+    const start = types.indexOf(`export const ${name} = [`)
+    const m = start < 0 ? null : [null, types.slice(start, types.indexOf('] as const', start))]
+    assert.ok(m, `${name} in types.ts`)
+    return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1])
+  }
+  for (const k of ['STYLES', 'POSES', 'EXPRESSIONS', 'SETTINGS', 'PROPS']) assert.deepEqual(films[k], list(k), k)
+
+  const cues = films.autoSfx([
+    { seconds: 3, setting: 'ocean', text: { value: 'Stranded', kind: 'title', at: 0.5 }, props: [{ kind: 'raft', x: 0.5, y: 0.7, enter: 'none' }] },
+    { seconds: 4, setting: 'island', transition: 'wipe', camera: 'shake', props: [{ kind: 'crate', x: 0.7, y: 0.7, enter: 'drop', at: 1 }, { kind: 'star', x: 0.2, y: 0.2, at: 2 }] },
+    { seconds: 2, setting: 'island', actors: [{ pose: 'celebrate' }], sfx: [{ sound: 'ding', at: 1 }] },
+  ])
+  assert.deepEqual(
+    cues.map((c) => [c.sound, +c.at.toFixed(2)]),
+    [['ding', 0.5], ['whoosh', 2.7], ['boom', 3], ['thud', 4.3], ['pop', 5], ['sparkle', 7], ['ding', 8]],
+  )
+  // The tool takes the story as data and checks it.
+  const { z } = await import('zod')
+  const schema = z.object(films.filmSchema)
+  assert.ok(schema.safeParse({ title: 't', style: 'paper-cutout', scenes: [{ narration: 'Hi.', setting: 'island', actors: [{ pose: 'walk', x: 0.1, to: 0.5 }] }] }).success)
+  assert.ok(!schema.safeParse({ title: 't', style: 'watercolour', scenes: [{ setting: 'island' }] }).success)
+  assert.ok(!schema.safeParse({ title: 't', style: 'clay', scenes: [{ setting: 'moon' }] }).success)
+})
+
+test('film channels get the story brief', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'jarvis-film-'))
+  const ap = createAutopilot({ workspace: ws, allowWrites: true, checkPath: () => null, publishers: {}, runAgent: async () => 'ok' })
+  const live = ap.makeServer({ live: true })
+  const r = await call(live, 'update_autopilot_channel', {
+    id: 'stranded',
+    niche: 'True survival stories',
+    style: 'films',
+    platforms: ['youtube', 'tiktok'],
+    film: { style: 'paper-cutout', watermark: 'Stranded Tales', hero: { outfit: '#3f7cc4' }, minutes: 3 },
+  })
+  assert.equal(r.data.channel.film.style, 'paper-cutout')
+  const prompt = ap.briefFor('stranded')
+  assert.match(prompt, /make_film/)
+  assert.match(prompt, /OUTLIERS/)
+  assert.match(prompt, /paper-cutout/)
+  assert.match(prompt, /"outfit":"#3f7cc4"/)
+  assert.match(prompt, /36-48 scenes, 420-495 words/)
+  assert.match(prompt, /6\. For tiktok: make a second, 9:16 cut/)
+  assert.match(prompt, /7\. Queue with create_scheduled_post \(channel: "stranded"\): the 16:9 film for youtube only, with thumbnail/)
+  assert.match(prompt, /8\. Finish with one line/)
+  // The main channel can be a film channel too.
+  const solo = createAutopilot({ workspace: mkdtempSync(join(tmpdir(), 'jarvis-solo-')), allowWrites: true, checkPath: () => null, publishers: {}, runAgent: async () => 'ok' })
+  await call(solo.makeServer({ live: true }), 'update_autopilot_settings', { niche: 'History mysteries', style: 'films', platforms: ['youtube'], film: { style: 'ink-wash', watermark: 'Untold Files' } })
+  const main = solo.briefFor('main')
+  assert.match(main, /ink-wash/)
+  assert.match(main, /Watermark: Untold Files/)
+  assert.doesNotMatch(main, /9:16 cut/)
+  // A short-video channel keeps the short brief.
+  await call(live, 'update_autopilot_channel', { id: 'ocean', niche: 'Strange sea creatures', platforms: ['youtube'] })
+  assert.match(ap.briefFor('ocean'), /render_short/)
+})
+
+test('the videos page lists finished videos only, escaped', async () => {
+  const { listVideos, renderVideosPage } = await import('../bridge/videos-page.mjs')
+  const ws = mkdtempSync(join(tmpdir(), 'jarvis-vid-'))
+  const { mkdirSync } = await import('node:fs')
+  const d = join(ws, 'studio', '20261125101500-the-island')
+  mkdirSync(d, { recursive: true })
+  for (const f of ['the-island.mp4', 'silent.mp4', 'scene-01.mp4', 'thumbnail.jpg']) writeFileSync(join(d, f), 'x')
+  mkdirSync(join(ws, 'autopilot'), { recursive: true })
+  writeFileSync(join(ws, 'autopilot', 'queue.json'), JSON.stringify([{ video: join(d, 'the-island.mp4'), title: 'Stranded <438> days', status: 'done', results: { youtube: { ok: true, url: 'https://youtu.be/x' } } }]))
+  const v = await listVideos(ws)
+  assert.equal(v.length, 1)
+  assert.equal(v[0].status, 'posted')
+  assert.ok(v[0].thumb.endsWith('thumbnail.jpg'))
+  const html = renderVideosPage(v)
+  assert.match(html, /Stranded &lt;438&gt; days/)
+  assert.match(html, /href="https:\/\/youtu.be\/x"/)
+  assert.doesNotMatch(html, /silent\.mp4/)
+})
+
+test('agency: booking link goes in the pitch and back to anyone who asks to meet', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'jarvis-book-'))
+  const pipelines = createPipelines({ workspace: ws })
+  let prompt = ''
+  const agency = createAgency({ workspace: ws, allowWrites: true, runAgent: async (p) => ((prompt = p), 'SUMMARY: ok'), pipelines })
+  const live = agency.makeServer({ live: true })
+  await call(live, 'update_agency_settings', { bookingLink: 'https://cal.com/halvo/15min', meetingMinutes: 15, offer: 'Starter $900', senderName: 'Sam', businessAddress: '1 Main St' })
+  await agency.runNow('test')
+  assert.match(prompt, /Book a 15-minute look at your demo: https:\/\/cal\.com\/halvo\/15min/)
+  assert.match(prompt, /INBOX/)
+  assert.match(prompt, /move the card to "meeting"/)
+  assert.match(prompt, /Opt-outs are honoured at once/)
+  await call(live, 'update_agency_settings', { autoBook: false })
+  await agency.runNow('test')
+  assert.match(prompt, /replyDraft/)
+  assert.match(prompt, /Do not send it yourself/)
 })

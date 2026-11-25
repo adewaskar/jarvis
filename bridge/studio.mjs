@@ -16,7 +16,7 @@ import { safe } from './secrets.mjs'
  * posting tools are allowed to read, so "render it, then post it" just works.
  */
 
-const FFMPEG = process.env.FFMPEG_PATH ?? 'ffmpeg'
+export const FFMPEG = process.env.FFMPEG_PATH ?? 'ffmpeg'
 const FFPROBE = process.env.FFPROBE_PATH ?? 'ffprobe'
 const W = 1080
 const H = 1920
@@ -25,7 +25,7 @@ const IMAGE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp'])
 const CAPTION_STYLE =
   "Fontname=Arial,Fontsize=13,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=70"
 
-function run(bin, args, cwd) {
+export function run(bin, args, cwd) {
   return new Promise((resolve, reject) => {
     const p = spawn(bin, args, { cwd, windowsHide: true })
     let err = ''
@@ -54,8 +54,8 @@ export async function probe(path) {
   }
 }
 
-const slug = (s) => String(s || 'video').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'video'
-const stamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+export const slug = (s) => String(s || 'video').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'video'
+export const stamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
 const srtTime = (t) => {
   const ms = Math.max(0, Math.round(t * 1000))
   const p = (n, w = 2) => String(n).padStart(w, '0')
@@ -87,9 +87,9 @@ function wordsToSrt(words, perLine = 3) {
  * second of speech here; the model (q8, ~90 MB) is cached in ~/.jarvis/models/hf.
  */
 const KOKORO_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX'
-const KOKORO_DEFAULT_VOICE = process.env.JARVIS_KOKORO_VOICE || 'bm_george'
+export const KOKORO_DEFAULT_VOICE = process.env.JARVIS_KOKORO_VOICE || 'bm_george'
 let kokoroLoading = null
-function kokoro() {
+export function kokoro() {
   kokoroLoading ??= (async () => {
     const { env } = await import('@huggingface/transformers')
     env.cacheDir = join(homedir(), '.jarvis', 'models', 'hf')
@@ -103,7 +103,7 @@ function kokoro() {
 }
 
 /** First and last sample louder than the noise floor, so word timings skip the silence Kokoro pads with. */
-function speechSpan(samples, rate) {
+export function speechSpan(samples, rate) {
   const thr = 0.01
   let a = 0
   let b = samples.length - 1
@@ -113,7 +113,7 @@ function speechSpan(samples, rate) {
 }
 
 /** Spread a sentence's words over its spoken span, weighted by length, with extra room after commas. */
-function timeWords(sentence, from, to) {
+export function timeWords(sentence, from, to) {
   const parts = sentence.split(/\s+/).filter(Boolean)
   const weight = (w) => Math.max(2, w.replace(/[^\p{L}\p{N}]/gu, '').length) + (/[,;:—–-]$/.test(w) ? 3 : 0) + 1
   const total = parts.reduce((s, w) => s + weight(w), 0) || 1
@@ -126,7 +126,7 @@ function timeWords(sentence, from, to) {
   })
 }
 
-function wavBuffer(samples, rate) {
+export function wavBuffer(samples, rate) {
   const buf = Buffer.alloc(44 + samples.length * 2)
   buf.write('RIFF', 0)
   buf.writeUInt32LE(36 + samples.length * 2, 4)
@@ -302,10 +302,10 @@ export function studioServer({ allowWrites, checkPath, workspace, elevenKey, onR
         for (const d of dirs) {
           for (const name of await readdir(join(root, d)).catch(() => [])) {
             // The finished video is <title>.mp4; the rest are working files.
-            if (!/.mp4$/i.test(name) || /^(silent|cut|scene-d+).mp4$/i.test(name)) continue
+            if (!/\.mp4$/i.test(name) || /^(silent|cut|scene-\d+)\.mp4$/i.test(name)) continue
             const p = join(root, d, name)
             const st = await stat(p).catch(() => null)
-            if (st?.isFile()) found.push({ path: p, title: d.replace(/^d[d-]*-/, '').replace(/-/g, ' '), mb: +(st.size / 1e6).toFixed(1), made: st.mtime.toISOString() })
+            if (st?.isFile()) found.push({ path: p, title: d.replace(/^\d[\d-]*-/, '').replace(/-/g, ' '), mb: +(st.size / 1e6).toFixed(1), made: st.mtime.toISOString() })
           }
         }
         return found.sort((a, b) => b.made.localeCompare(a.made)).slice(0, limit)

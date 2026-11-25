@@ -41,6 +41,31 @@ Every video is **1080×1920**, ready for Shorts, Reels and TikTok, and saved in
 Try saying: *"Make a 30-second short about why octopuses are smart."*
 Or: *"Cut the three best moments from the podcast in my footage folder."*
 
+### Animated story films
+
+`make_film` makes 1–15 minute animated story videos: one hero character, one art
+style, title cards, counting numbers, word-by-word subtitles, sound effects and a
+music bed that ducks under the voice. JARVIS writes the film as scenes (setting,
+characters, poses, props, camera moves, narration) and Remotion draws every frame.
+It runs offline and costs nothing: Kokoro narrates and ffmpeg makes the sounds.
+
+- **Art styles**: paper-cutout, pixel-art, ink-wash, retro-cartoon, clay,
+  chalkboard, flat-vector, neon-night.
+- **Formats**: 16:9 for YouTube, 9:16 for Shorts, Reels and TikTok.
+- **One-time install** (about 300 MB, including a headless Chrome):
+  `npm run films:install`.
+- **Licence**: Remotion is free for individuals and companies of up to three
+  people. Larger companies need a Remotion company licence.
+
+Turn an autopilot channel into a film channel with *"make the main channel a
+films channel, ink-wash style, 3-minute history mysteries"*. Each day it researches
+outliers, writes and renders a film, queues the 16:9 cut to YouTube with its
+thumbnail, and posts a 9:16 cut to the other platforms.
+
+**Watch everything** at <http://localhost:8787/videos>. That page lists every
+video JARVIS has made, newest first, with whether it was posted, is waiting for
+your OK, or was never queued.
+
 ## Autopilot
 
 Try saying: *"Turn on the autopilot. Niche: budget travel tips. Post at 9am and
@@ -199,6 +224,21 @@ straight away. The log is in `projects/agency/runs.log`.
 4. Restart JARVIS and say *"call me to test the phone line"*.
 
 Trial calls start with a short Twilio notice until you upgrade.
+
+**Meetings.** Make a free booking page: a Google Calendar appointment schedule,
+Calendly or Cal.com. Then say *"set the agency booking link to <url>, 15-minute
+meetings"*. Each pitch then ends with "Book a 15-minute look at your demo".
+After pitches go out, the loop reads replies:
+
+- **Opt-out**: the card goes to *lost* with "do not contact", and JARVIS never
+  writes to that business again.
+- **Wants to meet**: JARVIS replies with your booking link and moves the card to
+  *meeting*. If a calendar tool is connected and they named a free time, he books
+  it for you. Set `autoBook` off and he drafts the reply for you to send instead.
+- **Questions**: he drafts an answer from the offer sheet for you to send.
+  Prices, discounts and terms are always yours to decide.
+
+New replies and meetings reach you the same way new leads do.
 
 **Standing orders.** What you tell JARVIS to always do is kept in
 `~/.jarvis/workspace/memory/core.md`. That file is read into every session,

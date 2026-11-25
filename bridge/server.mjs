@@ -21,7 +21,7 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
-import { youtubeServer, youtubeUpload } from './youtube.mjs'
+import { youtubeServer, youtubeSetThumbnail, youtubeUpload } from './youtube.mjs'
 import { youtubeConnected } from './youtube-auth.mjs'
 import { tiktokConnected, tiktokPublish, tiktokServer } from './tiktok.mjs'
 import { instagramConnected, instagramPublishReel, instagramServer } from './instagram.mjs'
@@ -29,6 +29,8 @@ import { facebookConnected, facebookPublishReel, makeFacebookServer } from './fa
 import { accountSecret, listAccounts } from './accounts.mjs'
 import { hasSecret } from './secrets.mjs'
 import { ffmpegAvailable, probe as probeVideo, studioServer } from './studio.mjs'
+import { filmsInstalled, filmsServer } from './films.mjs'
+import { listVideos, renderVideosPage } from './videos-page.mjs'
 import { toast } from './phone.mjs'
 import { configuredWallets, cryptoServer } from './crypto.mjs'
 import { createAutopilot } from './autopilot.mjs'
@@ -501,6 +503,11 @@ const PROMPT_CREATOR = `The creator suite — their channels, studio and money:
   A finished video opens on screen and plays by itself: say it's ready in one
   line and stop. Don't describe it or read out file paths. To replay one, use
   list_studio_videos then show_video ("show me the last video").
+- Animated story films (jarvis_films, make_film) are the faceless animated-channel
+  format: the channel's own character in one art style, 2-3 minute stories told
+  scene by scene with narration, subtitles, sound effects and music, 16:9 for
+  YouTube or 9:16 for Shorts. Everything the user made is at
+  http://localhost:8787/videos ("show me all the videos": open that page).
 - To post to several platforms use create_scheduled_post; it obeys daily caps
   that keep the accounts from being flagged as bots. Disclose paid partnerships
   (brandContent) and own-product promotion (brandOrganic).
@@ -563,13 +570,22 @@ const checkToolPath = (p) => pathProblem(p, { cwd: WORKSPACE, roots: TOOL_ROOTS 
 const PUBLISHERS = {
   ...(YOUTUBE_ON
     ? {
-        youtube: (it) =>
-          youtubeUpload(it.video, {
+        youtube: async (it) => {
+          const r = await youtubeUpload(it.video, {
             title: it.title,
             description: it.captions?.youtube ?? it.caption ?? '',
             tags: it.tags,
             privacy: it.youtubePrivacy ?? 'public',
-          }),
+          })
+          // A custom thumbnail needs a verified channel; the upload still counts without it.
+          if (it.thumbnail && r.uploaded) {
+            r.thumbnail = await youtubeSetThumbnail(r.uploaded, it.thumbnail).then(
+              () => 'set',
+              (e) => `not set: ${e.message}`,
+            )
+          }
+          return r
+        },
       }
     : {}),
   ...(TIKTOK_ON
@@ -658,6 +674,7 @@ function creatorServers({ live = true, show = null } = {}) {
           }),
         }
       : {}),
+    ...(STUDIO_ON && filmsInstalled() ? { jarvis_films: filmsServer({ ...opts, workspace: WORKSPACE, onRendered: show }) } : {}),
     ...(CRYPTO_ON ? { jarvis_crypto: cryptoServer({ ...opts, workspace: WORKSPACE }) } : {}),
     ...(autopilot ? { jarvis_autopilot: autopilot.makeServer({ live }) } : {}),
     // Unattended runs get only the paperwork tool: an agency run must not start another or ring the phone itself.
@@ -1096,6 +1113,36 @@ const handleRequest = async (req, res) => {
       res.writeHead(404, cors)
       return res.end('not found')
     }
+  }
+
+  // Every video JARVIS made, on one page, playable.
+  if (req.method === 'GET' && (req.url === '/videos' || req.url === '/videos/')) {
+    const page = renderVideosPage(await listVideos(WORKSPACE))
+    res.writeHead(200, {
+      ...cors,
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; media-src 'self'; img-src 'self'",
+    })
+    return res.end(page)
+  }
+  // Their thumbnails: images inside the studio folder only.
+  if (req.method === 'GET' && req.url?.startsWith('/videos/thumb?')) {
+    const asked = new URL(req.url, 'http://x').searchParams.get('path') ?? ''
+    let real = null
+    try {
+      if (isAbsolute(asked)) real = await realpath(asked)
+    } catch {
+      real = null
+    }
+    const type = real ? { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png' }[real.slice(real.lastIndexOf('.')).toLowerCase()] : null
+    const rel = real ? relative(realpathSync(join(WORKSPACE, 'studio')), real) : '..'
+    if (!type || rel.startsWith('..') || isAbsolute(rel)) {
+      res.writeHead(400, cors)
+      return res.end('studio images only')
+    }
+    res.writeHead(200, { ...cors, 'content-type': type, 'cache-control': 'max-age=3600', 'x-content-type-options': 'nosniff' })
+    return res.end(await readFile(real))
   }
 
   // The brain switcher. POST needs a custom header, which a cross-site form cannot send.

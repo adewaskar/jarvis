@@ -1,0 +1,22 @@
+{
+  "name": "jarvis-films",
+  "private": true,
+  "type": "module",
+  "description": "Animated story films for the faceless channels, drawn in code with Remotion.",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.547",
+    "@remotion/cli": "4.0.547",
+    "@remotion/renderer": "4.0.547",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.547"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "typescript": "~6.0.2"
+  }
+}

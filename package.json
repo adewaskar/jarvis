@@ -18,6 +18,7 @@
     "bridge": "node bridge/server.mjs",
     "bridge:writes": "node bridge/server.mjs --writes",
     "setup": "node scripts/setup.mjs",
+    "films:install": "npm --prefix films install --ignore-scripts",
     "youtube:connect": "node scripts/youtube-connect.mjs",
     "social:connect": "node scripts/social-connect.mjs",
     "phone:connect": "node scripts/phone-connect.mjs"
