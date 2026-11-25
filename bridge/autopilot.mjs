@@ -238,20 +238,24 @@ export function createAutopilot({ workspace, allowWrites, checkPath, publishers,
       // Don't pile up videos the caps won't let out today.
       const pending = queue().filter((q) => (q.channel ?? 'main') === c.id && q.status !== 'done' && q.status !== 'cancelled').length
       if (pending >= (c.postsPerDayPerPlatform ?? s.postsPerDayPerPlatform) * 2) continue
-      creating = true
       s.lastRuns[slotKey(c, slot)] = today()
       db.write('settings', s)
-      const name = c.id === 'main' ? slot : `${c.id} ${slot}`
-      console.log(`[autopilot] creating the ${name} video`)
-      try {
-        const out = await runAgent(brief(c))
-        console.log(`[autopilot] ${name} run finished: ${String(out).slice(0, 200)}`)
-      } catch (e) {
-        console.warn(`[autopilot] ${name} run failed: ${e.message}`)
-      } finally {
-        creating = false
-      }
+      await runChannel(c, c.id === 'main' ? slot : `${c.id} ${slot}`)
       return
+    }
+  }
+
+  /** One unattended video run for a channel. Callers check `creating` first. */
+  async function runChannel(c, name) {
+    creating = true
+    console.log(`[autopilot] creating the ${name} video`)
+    try {
+      const out = await runAgent(brief(c))
+      console.log(`[autopilot] ${name} run finished: ${String(out).slice(0, 200)}`)
+    } catch (e) {
+      console.warn(`[autopilot] ${name} run failed: ${e.message}`)
+    } finally {
+      creating = false
     }
   }
 
@@ -675,6 +679,21 @@ The publisher posts it automatically and respects the daily caps.`,
         db.write('queue', q)
         remember(item, 'approved', feedback)
         return { approved: id, at: item.at, platforms: item.platforms }
+      }),
+    ),
+    tool(
+      'run_channel_now',
+      'Start a channel\'s next video right away instead of waiting for its scheduled time, when the owner asks. It runs in the background (a film takes 10-30 minutes) and goes through the same research, quality gate and queue as a scheduled run. Its scheduled slots still run.',
+      { channel: z.string().optional() },
+      safe(async ({ channel }) => {
+        const s = settings()
+        if (!s.enabled) throw new Error('The autopilot is off. Turn it on first.')
+        const c = channelOf(s, channel ?? 'main')
+        if (!c) throw new Error('No channel with that id.')
+        if (!c.niche) throw new Error('That channel has no niche yet.')
+        if (creating) throw new Error('A video is being made right now. Try again when it is done.')
+        void runChannel(c, `${c.id} (on request)`)
+        return { started: c.id, style: c.style, note: 'Running in the background. It will appear on http://localhost:8787/videos and in the queue when done.' }
       }),
     ),
   ]

@@ -171,7 +171,7 @@ export function createBrain({ workspace, defaultModel, effort }) {
   function recover() {
     if (!state.limitedUntil || now() < state.limitedUntil) return false
     const back = state.fellBack && state.mode === 'local'
-    const { limitedUntil, fellBack, ...rest } = state
+    const { limitedUntil: _l, fellBack: _f, ...rest } = state
     state = back ? { ...rest, mode: 'cloud' } : rest
     save()
     return Boolean(back)
@@ -181,7 +181,7 @@ export function createBrain({ workspace, defaultModel, effort }) {
   const userSet = async (a) => {
     const d = await set(a)
     if (state.fellBack) {
-      const { fellBack, ...rest } = state
+      const { fellBack: _f, ...rest } = state
       state = rest
       save()
     }

@@ -24,11 +24,7 @@ import { BRIDGE_HTTP_URL } from '../config'
 
 /**
  * Paths that are genuinely on this machine's disk, as opposed to app-relative
- * URLs that happen to start with a slash. Mirrors the same test in
- * src/ui/Panels.tsx — the two cannot share it without one of them importing a
- * DOM component into the scene or the other way round, and the list of root
- * directories is the sort of thing that should be changed in both places
- * deliberately anyway.
+ * URLs that happen to start with a slash.
  */
 const DISK_PATH =
   /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//

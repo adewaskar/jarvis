@@ -29,7 +29,7 @@ const WRITES = {
   jarvis_studio: ['create_image', 'create_voiceover', 'create_captions', 'render_short', 'render_clip'],
   jarvis_crypto: ['create_nft_package'],
   jarvis_films: ['make_film'],
-  jarvis_autopilot: ['update_autopilot_settings', 'update_autopilot_channel', 'approve_scheduled_post', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
+  jarvis_autopilot: ['update_autopilot_settings', 'update_autopilot_channel', 'approve_scheduled_post', 'run_channel_now', 'create_scheduled_post', 'delete_scheduled_post', 'update_products', 'update_brand_deal'],
   jarvis_pipelines: ['create_pipeline_card', 'update_pipeline_card', 'delete_pipeline_card'],
   jarvis_system: ['launch_app', 'launch_link', 'close_app', 'set_volume', 'lock_computer', 'sleep_computer', 'schedule_shutdown', 'cancel_shutdown'],
   jarvis_agency: ['update_agency_settings', 'launch_agency_run', 'call_owner', 'prepare_client_documents'],
@@ -202,6 +202,7 @@ test('new channels hold videos for review, refuse repeats and learn from feedbac
   const names = (srv) => Object.keys(srv.instance._registeredTools)
   assert.ok(names(live).includes('approve_scheduled_post'))
   assert.ok(!names(headless).includes('approve_scheduled_post'), 'an unattended run cannot approve its own video')
+  assert.ok(!names(headless).includes('run_channel_now'), 'an unattended run cannot start more runs')
 
   await call(live, 'update_autopilot_channel', { id: 'ocean', niche: 'Strange sea creatures', platforms: ['youtube'], voice: 'bm_fable', format: 'one creature, one superpower, one twist' })
   const a = await call(headless, 'create_scheduled_post', { video, title: 'Why octopuses taste with their arms', channel: 'ocean', platforms: ['youtube'] })
