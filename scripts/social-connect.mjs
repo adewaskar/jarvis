@@ -1,0 +1,248 @@
+/**
+ * Connect JARVIS to TikTok, Instagram or a Facebook Page — run once per platform:
+ *
+ *   npm run social:connect -- tiktok
+ *   npm run social:connect -- instagram
+ *   npm run social:connect -- facebook
+ *
+ * More channels: add `--account <name>` (e.g. `-- tiktok --account cooking`)
+ * to save another account beside the main one.
+ *
+ * Asks for your developer app's key, secret and redirect URI the first time
+ * (see SOCIAL.md), opens the platform's consent screen, and saves the tokens
+ * to ~/.jarvis/secrets/<platform>.json.
+ *
+ * Both platforms insist on an https redirect URI, which nothing on this machine
+ * is listening on. That is fine: after you approve, the browser lands on that
+ * URL (it may show an error page — ignore it), and you paste the address from
+ * the address bar back here. If you registered an http://localhost URL
+ * instead, it is caught automatically.
+ */
+
+import { createServer } from 'node:http'
+import { randomBytes } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import { createInterface } from 'node:readline/promises'
+import { readSecret, saveSecret } from '../bridge/secrets.mjs'
+import { TIKTOK_SCOPES } from '../bridge/tiktok.mjs'
+import { IG_SCOPES } from '../bridge/instagram.mjs'
+import { FB_SCOPES } from '../bridge/facebook.mjs'
+import { accountArg, accountSecret, withoutAccountArg } from '../bridge/accounts.mjs'
+
+const ACCOUNT = accountArg()
+const platform = (withoutAccountArg()[2] ?? '').toLowerCase()
+const tokenName = () => accountSecret(platform, ACCOUNT)
+if (!['tiktok', 'instagram', 'facebook'].includes(platform)) {
+  console.error('\n  Usage: npm run social:connect -- tiktok|instagram|facebook [--account <name>]\n')
+  process.exit(1)
+}
+
+const rl = createInterface({ input: process.stdin, output: process.stdout })
+const ask = async (q, def) => ((await rl.question(`  ${q}${def ? ` [${def}]` : ''}: `)).trim() || def || '')
+
+const LABEL =
+  platform === 'tiktok'
+    ? { key: 'Client key', secret: 'Client secret' }
+    : platform === 'facebook'
+      ? { key: 'Meta app ID', secret: 'Meta app secret' }
+      : { key: 'Instagram app ID', secret: 'Instagram app secret' }
+
+let app = readSecret(`${platform}-app`)
+if (!app || process.argv.includes('--reset')) {
+  console.log(`\n  First-time setup for ${platform}. Values come from your developer app (SOCIAL.md).\n`)
+  app = {
+    client_id: await ask(LABEL.key),
+    client_secret: await ask(LABEL.secret),
+    redirect_uri: await ask('Redirect URI exactly as registered', 'https://localhost:8443/callback'),
+  }
+  if (!app.client_id || !app.client_secret) {
+    console.error('\n  Both the key and the secret are needed.\n')
+    process.exit(1)
+  }
+  saveSecret(`${platform}-app`, app)
+}
+
+const FB_VER = process.env.FB_GRAPH_VERSION ?? 'v24.0'
+const state = randomBytes(16).toString('hex')
+const auth =
+  platform === 'tiktok'
+    ? `https://www.tiktok.com/v2/auth/authorize/?${new URLSearchParams({
+        client_key: app.client_id,
+        scope: TIKTOK_SCOPES,
+        response_type: 'code',
+        redirect_uri: app.redirect_uri,
+        state,
+      })}`
+    : platform === 'facebook'
+      ? `https://www.facebook.com/${FB_VER}/dialog/oauth?${new URLSearchParams({
+          client_id: app.client_id,
+          redirect_uri: app.redirect_uri,
+          response_type: 'code',
+          scope: FB_SCOPES,
+          state,
+        })}`
+      : `https://www.instagram.com/oauth/authorize?${new URLSearchParams({
+        client_id: app.client_id,
+        redirect_uri: app.redirect_uri,
+        response_type: 'code',
+        scope: IG_SCOPES,
+        state,
+        enable_fb_login: '0',
+        force_reauth: 'true',
+      })}`
+
+console.log(`\n  Opening ${platform} sign-in in your browser. If it does not open, paste this into Chrome:\n\n  ${auth}\n`)
+openBrowser(auth)
+
+const code = await getCode()
+try {
+  if (platform === 'tiktok') await finishTikTok(code)
+  else if (platform === 'facebook') await finishFacebook(code)
+  else await finishInstagram(code)
+  if (ACCOUNT) console.log(`  Saved as the "${ACCOUNT}" ${platform} account.`)
+  console.log('  Restart the bridge (npm start -- --writes) and JARVIS has it.\n')
+  process.exit(0)
+} catch (err) {
+  console.error(`\n  Could not finish sign-in: ${err.message}\n`)
+  process.exit(1)
+}
+
+/** Catch the redirect on loopback if possible, otherwise ask for the pasted URL. */
+async function getCode() {
+  const r = new URL(app.redirect_uri)
+  const loopback = r.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(r.hostname)
+  const parse = (raw) => {
+    const u = new URL(raw.trim(), app.redirect_uri)
+    if (u.searchParams.get('error')) throw new Error(`${platform} said: ${u.searchParams.get('error_description') ?? u.searchParams.get('error')}`)
+    if (u.searchParams.get('state') !== state) throw new Error('State mismatch — paste the address from this sign-in, not an older one.')
+    // Instagram appends "#_" to the code.
+    return (u.searchParams.get('code') ?? '').replace(/#_?$/, '')
+  }
+  if (!loopback) {
+    console.log('  After approving, your browser goes to your redirect URI (an error page there is normal).')
+    const pasted = await ask('Paste the FULL address from the address bar here')
+    rl.close()
+    return parse(pasted)
+  }
+  rl.close()
+  return new Promise((resolve, reject) => {
+    const srv = createServer((req, res) => {
+      if (!req.url.startsWith(r.pathname)) return res.writeHead(404).end()
+      res.writeHead(200, { 'content-type': 'text/html' }).end('<body style="font:16px system-ui;padding:3em">Connected — you can close this tab.</body>')
+      srv.close()
+      try {
+        resolve(parse(`http://${req.headers.host}${req.url}`))
+      } catch (e) {
+        reject(e)
+      }
+    }).listen(Number(r.port || 80), r.hostname)
+  })
+}
+
+async function finishTikTok(code) {
+  const res = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_key: app.client_id,
+      client_secret: app.client_secret,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: app.redirect_uri,
+    }),
+  })
+  const b = await res.json()
+  if (!res.ok || !b.access_token) throw new Error(b.error_description ?? b.error ?? `status ${res.status}`)
+  saveSecret(tokenName(), {
+    client_key: app.client_id,
+    client_secret: app.client_secret,
+    open_id: b.open_id,
+    scope: b.scope,
+    access_token: b.access_token,
+    refresh_token: b.refresh_token,
+    expires_at: Date.now() + b.expires_in * 1000,
+  })
+  const me = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=display_name,follower_count', {
+    headers: { authorization: `Bearer ${b.access_token}` },
+  }).then((x) => x.json())
+  const u = me.data?.user
+  console.log(`\n  Connected to TikTok: ${u ? `${u.display_name} (${u.follower_count ?? '?'} followers)` : 'ok'}`)
+  if (!String(b.scope).includes('video.publish')) {
+    console.log('  Note: video.publish was not granted — add the Content Posting API product and Direct Post to your app.')
+  }
+}
+
+async function finishInstagram(code) {
+  const short = await fetch('https://api.instagram.com/oauth/access_token', {
+    method: 'POST',
+    body: new URLSearchParams({
+      client_id: app.client_id,
+      client_secret: app.client_secret,
+      grant_type: 'authorization_code',
+      redirect_uri: app.redirect_uri,
+      code,
+    }),
+  }).then((x) => x.json())
+  if (!short.access_token) throw new Error(short.error_message ?? short.error?.message ?? JSON.stringify(short))
+  const long = await fetch(
+    `https://graph.instagram.com/access_token?${new URLSearchParams({
+      grant_type: 'ig_exchange_token',
+      client_secret: app.client_secret,
+      access_token: short.access_token,
+    })}`,
+  ).then((x) => x.json())
+  if (!long.access_token) throw new Error(long.error?.message ?? 'could not get a long-lived token')
+  const me = await fetch(
+    `https://graph.instagram.com/me?fields=user_id,username,account_type,followers_count&access_token=${encodeURIComponent(long.access_token)}`,
+  ).then((x) => x.json())
+  saveSecret(tokenName(), {
+    user_id: me.user_id ?? String(short.user_id),
+    username: me.username,
+    access_token: long.access_token,
+    expires_at: Date.now() + long.expires_in * 1000,
+  })
+  console.log(`\n  Connected to Instagram: @${me.username} (${me.account_type}, ${me.followers_count ?? '?'} followers)`)
+  if (me.account_type && !['BUSINESS', 'MEDIA_CREATOR', 'CREATOR'].includes(me.account_type)) {
+    console.log('  Note: switch the account to Professional (Creator or Business) in the Instagram app, or publishing will be refused.')
+  }
+}
+
+async function finishFacebook(code) {
+  const g = (path, params) => fetch(`https://graph.facebook.com/${FB_VER}${path}?${new URLSearchParams(params)}`).then((x) => x.json())
+  const short = await g('/oauth/access_token', { client_id: app.client_id, client_secret: app.client_secret, redirect_uri: app.redirect_uri, code })
+  if (!short.access_token) throw new Error(short.error?.message ?? JSON.stringify(short))
+  // A Page token taken from a long-lived user token does not expire.
+  const long = await g('/oauth/access_token', {
+    grant_type: 'fb_exchange_token',
+    client_id: app.client_id,
+    client_secret: app.client_secret,
+    fb_exchange_token: short.access_token,
+  })
+  if (!long.access_token) throw new Error(long.error?.message ?? 'could not get a long-lived token')
+  const pages = (await g('/me/accounts', { fields: 'id,name,access_token,tasks', access_token: long.access_token })).data ?? []
+  const usable = pages.filter((p) => !p.tasks || p.tasks.includes('CREATE_CONTENT'))
+  if (!usable.length) {
+    throw new Error('No Facebook Page you can post to was shared with the app. Make a Page (facebook.com/pages/create), then run this again and tick it.')
+  }
+  let pick = usable[0]
+  if (usable.length > 1) {
+    const rl2 = createInterface({ input: process.stdin, output: process.stdout })
+    console.log('\n  Which Page is this channel?')
+    usable.forEach((p, i) => console.log(`    ${i + 1}. ${p.name}`))
+    const n = Number((await rl2.question('  Number: ')).trim())
+    rl2.close()
+    pick = usable[n - 1] ?? usable[0]
+  }
+  saveSecret(tokenName(), { page_id: pick.id, page_name: pick.name, access_token: pick.access_token, connected: new Date().toISOString() })
+  console.log(`\n  Connected to the Facebook Page: ${pick.name}`)
+}
+
+function openBrowser(url) {
+  const [cmd, args] =
+    process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]]
+  try {
+    spawn(cmd, args, { stdio: 'ignore', detached: true }).unref()
+  } catch {
+    /* printed above */
+  }
+}

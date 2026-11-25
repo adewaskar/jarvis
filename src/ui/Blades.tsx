@@ -50,9 +50,11 @@ const DISK_PATH =
 function viaBridge(raw: string, route: 'img' | 'media'): string {
   const src = String(raw ?? '').trim()
   if (!src) return ''
-  const path = src.replace(/^file:\/\//, '')
-  if (DISK_PATH.test(path)) {
-    return `${BRIDGE_HTTP_URL}/file?path=${encodeURIComponent(path)}`
+  const path = src.replace(/^file:\/\/\/?/, '')
+  // Windows paths too (C:\Users\...), which is where JARVIS's renders live.
+  if (DISK_PATH.test(path) || /^[A-Za-z]:[\\/]/.test(path)) {
+    // Local videos stream from /video (seekable); images come from /file.
+    return `${BRIDGE_HTTP_URL}/${route === 'media' ? 'video' : 'file'}?path=${encodeURIComponent(path)}`
   }
   if (!/^https?:\/\//i.test(src)) return src
   if (src.startsWith(`${BRIDGE_HTTP_URL}/`)) return src
@@ -205,7 +207,8 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
         src={viaBridge(blade.url, 'media')}
         controls
         playsInline
-        preload="metadata"
+        autoPlay={blade.autoplay}
+        preload={blade.autoplay ? 'auto' : 'metadata'}
       />
     )
   }

@@ -10,15 +10,19 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { request } from 'node:http'
 import { connect } from 'node:net'
-import { networkInterfaces } from 'node:os'
+import { mkdtempSync } from 'node:fs'
+import { networkInterfaces, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SERVER = fileURLToPath(new URL('../bridge/server.mjs', import.meta.url))
+// Test bridges write (crash.log, settings) to a throwaway workspace, never the owner's.
+const WORKSPACE = mkdtempSync(join(tmpdir(), 'jarvis-net-'))
 
 /** Start a bridge on a free port; resolves once it says where it is listening. */
 function startBridge(env = {}) {
   const child = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, JARVIS_BRIDGE_PORT: '0', ...env },
+    env: { ...process.env, JARVIS_WORKSPACE: WORKSPACE, JARVIS_BRIDGE_PORT: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let log = ''
@@ -159,7 +163,7 @@ test('refuses a WebSocket with a forged-looking foreign Origin', async () => {
 
 test('an occupied port is reported plainly and exits non-zero', async () => {
   const child = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, JARVIS_BRIDGE_PORT: String(bridge.port) },
+    env: { ...process.env, JARVIS_WORKSPACE: WORKSPACE, JARVIS_BRIDGE_PORT: String(bridge.port) },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let log = ''

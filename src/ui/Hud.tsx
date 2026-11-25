@@ -6,6 +6,9 @@ import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
+import { Deck } from './Deck'
+import { Command } from './Command'
+import { HUD_LAYOUT } from '../config'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -175,8 +178,13 @@ export function Hud() {
     else root.style.removeProperty('--bg')
   }, [ui.background])
 
+  // Lets the stylesheet dim the 3D reactor into a backdrop behind the hologram.
+  useEffect(() => {
+    document.documentElement.dataset.layout = HUD_LAYOUT
+  }, [])
+
   return (
-    <div className="hud" style={{ ['--accent' as string]: colour }}>
+    <div className={HUD_LAYOUT === 'command' ? 'hud hud-command' : 'hud'} style={{ ['--accent' as string]: colour }}>
       {/* First in the tree on purpose. Everything after it is positioned with
           `z-index: auto`, so paint order is document order and the sweep stays
           behind the transcript and the panels without a z-index war. */}
@@ -186,6 +194,9 @@ export function Hud() {
       <Corner at="tr" />
       <Corner at="bl" />
       <Corner at="br" />
+
+      {/* The command deck: live panels framing the reactor (wide screens). */}
+      {HUD_LAYOUT === 'command' ? <Command /> : ui.chrome.systems && <Deck />}
 
       <header className="hud-top">
         {ui.chrome.brand && (

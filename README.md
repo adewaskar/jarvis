@@ -153,6 +153,9 @@ is roughly:
 - **Voice** — `elevenlabs`
 - **Your phone** — `android`
 - **The browser** — `playwright`
+- **The creator suite** — built in: your YouTube, TikTok and Instagram, a video
+  studio, a posting autopilot, the Agency leads and YouTube pipelines, and crypto
+  prices, wallets and payment links. See [CREATOR.md](CREATOR.md).
 
 A few things you can say:
 
@@ -236,7 +239,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
 | `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
 | `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
-| `JARVIS_DISABLE` | none | Comma-separated capabilities to leave out: `browser`, `camera`, `interface` |
+| `JARVIS_DISABLE` | none | Comma-separated capabilities to leave out: `browser`, `camera`, `interface`, `youtube`, `tiktok`, `instagram`, `facebook`, `studio`, `crypto`, `autopilot`, `pipelines`, `agency`, `system` |
 | `JARVIS_ALLOWED_ORIGINS` | local dev | Extra WebSocket origins to accept |
 | `JARVIS_ALLOW_NO_ORIGIN` | off | Accept connections with no `Origin` header |
 | `JARVIS_WORKSPACE` | `~/.jarvis/workspace` | The agent's working directory; file tools are confined to it and the temp directory |
@@ -245,7 +248,9 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_CLAUDE_EXECUTABLE` | bundled CLI | Run the agent through this executable instead, e.g. a sandbox wrapper that execs the real CLI |
 | `JARVIS_CHROME_PIPE` | none | WSL only: the Windows pipe name the browser relay connects to |
 | `JARVIS_DEBUG` | off | `1` logs every agent message to the bridge terminal, answer text and tool calls included |
-| `JARVIS_VOICE_ID` | none | ElevenLabs voice id |
+| `JARVIS_VOICE_ID` | none | ElevenLabs voice id for JARVIS's spoken replies (not the studio voiceovers) |
+| `JARVIS_KOKORO_VOICE` | `bm_george` | Kokoro voice for studio voiceovers, which run free on the laptop |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | none | Phone line the agency loop calls you on. Easier: `npm run phone:connect`. Without one you get a Windows notification instead |
 | `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe |
 
 ### Frontend (`.env.local`)
@@ -257,6 +262,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `VITE_TTS_ENGINE` | `system` or `kokoro` |
 | `VITE_KOKORO_VOICE` | Voice for the Kokoro engine |
 | `VITE_USE_ELEVENLABS` | Force the ElevenLabs voice on |
+| `VITE_HUD_LAYOUT` | `command` (default): the Command Center dashboard. `classic`: the original minimal HUD |
 | `VITE_ANTHROPIC_API_KEY` | Direct mode only |
 
 ### Adding an ElevenLabs key

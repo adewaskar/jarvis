@@ -1,0 +1,425 @@
+/* ------------------------------------------------------------ command center
+   Full-screen dashboard around the reactor. The middle column is left empty
+   so the 3D core shows through. Everything keys off --accent, so phase colours
+   and themes still carry through. */
+
+.cmd {
+  position: absolute;
+  inset: 0;
+  padding: 14px 16px 8px;
+  display: grid;
+  grid-template-columns: 150px minmax(230px, 290px) 1fr minmax(210px, 250px) minmax(190px, 230px);
+  grid-template-rows: 70px minmax(0, 1fr) minmax(0, 1fr) 150px 22px;
+  grid-template-areas:
+    'brand  greet  greet  greet  clock'
+    'nav    status core   agents biz'
+    'nav    tasks  core   crm    yt'
+    'voice  voice  cmd    recent recent'
+    'foot   foot   foot   foot   foot';
+  gap: 12px;
+  pointer-events: none;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  color: #d8f6ff;
+  font-size: 12px;
+  transition: opacity 400ms ease, filter 400ms ease;
+  /* Fixed electric blue, like the reference: the dashboard stays blue whatever
+     phase colour the reactor and transcript are showing. */
+  --accent: #22b8ff;
+  --holo: #5fdcff;
+  --line: color-mix(in srgb, var(--accent) 45%, transparent);
+  --faint: color-mix(in srgb, var(--accent) 10%, transparent);
+  --glow: color-mix(in srgb, var(--accent) 50%, transparent);
+  --ok: #3dff9a;
+  --bad: #ff5d6c;
+  --warn: #ffb547;
+}
+.cmd-dim-all { opacity: 0.18; filter: blur(1px); }
+.cmd > * { min-width: 0; min-height: 0; }
+
+.cmd-panel,
+.cmd-nav,
+.cmd-greet,
+.cmd-clock,
+.cmd-input,
+.cmd-quick-btn {
+  pointer-events: auto;
+  background: linear-gradient(160deg, rgba(4, 22, 38, 0.82), rgba(2, 10, 20, 0.72));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 18%, transparent), inset 0 0 26px color-mix(in srgb, var(--accent) 7%, transparent), inset 0 1px 0 color-mix(in srgb, var(--holo) 25%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.cmd-panel { display: flex; flex-direction: column; overflow: hidden; }
+.cmd-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px 6px;
+  border-bottom: 1px solid var(--faint);
+}
+.cmd-panel-title { font-weight: 600; font-size: 12px; letter-spacing: 0.14em; color: #eafcff; }
+.cmd-panel-body { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 7px; overflow: auto; scrollbar-width: none; }
+.cmd-link {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.cmd-link:hover { opacity: 1; text-shadow: 0 0 8px var(--glow); }
+
+.cmd-dim { opacity: 0.6; }
+.small { font-size: 10px; }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+
+/* header */
+.cmd-brand { display: flex; flex-direction: column; justify-content: center; pointer-events: auto; padding-left: 4px; }
+.cmd-brand-mark {
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  color: #eafcff;
+  text-shadow: 0 0 16px var(--glow), 0 0 34px var(--glow);
+}
+.cmd-brand-sub { font-size: 10px; letter-spacing: 0.32em; color: var(--accent); margin-top: 3px; }
+.cmd-brand-tag { font-size: 10px; opacity: 0.7; margin-top: 2px; }
+
+.cmd-greet {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 22px;
+  margin: 6px 6%;
+  border-radius: 999px;
+}
+.cmd-greet-text { font-size: 15px; color: #eafcff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.cmd-wave { display: flex; align-items: center; gap: 2px; height: 30px; flex: 0 0 auto; }
+.cmd-wave span {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--glow);
+  transform-origin: center;
+  transition: transform 90ms linear;
+}
+
+.cmd-clock { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; padding: 4px 14px; }
+.cmd-date { font-size: 11px; opacity: 0.8; }
+.cmd-time { font-family: 'JetBrains Mono', monospace; font-size: 20px; color: #eafcff; text-shadow: 0 0 10px var(--glow); }
+.cmd-place { font-size: 10px; opacity: 0.85; display: flex; gap: 8px; }
+.cmd-wx { color: var(--accent); }
+
+/* nav */
+.cmd-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px 6px; position: relative; }
+.cmd-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cmd-nav-item:hover { background: var(--faint); }
+.cmd-nav-item.active { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--line); color: #fff; }
+.cmd-nav-icon { width: 16px; text-align: center; color: var(--accent); }
+.cmd-settings {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: 10px;
+  width: 260px;
+  padding: 10px;
+  background: rgba(2, 12, 22, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  z-index: 5;
+}
+
+/* checks + health */
+.cmd-check { display: flex; align-items: center; gap: 8px; }
+.cmd-check b { font-weight: 600; }
+.cmd-tick {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+}
+.cmd-tick.ok { background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ok); }
+.cmd-tick.bad { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); }
+.cmd-tick.idle { background: var(--faint); color: var(--accent); }
+
+.cmd-health { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+.cmd-ring { width: 74px; height: 74px; transform: rotate(-90deg); }
+.cmd-ring-track { fill: none; stroke: var(--faint); stroke-width: 7; }
+.cmd-ring-fill { fill: none; stroke: var(--ok); stroke-width: 7; stroke-linecap: round; filter: drop-shadow(0 0 5px var(--ok)); transition: stroke-dasharray 600ms ease; }
+.cmd-ring-text { transform: rotate(90deg); transform-origin: 42px 42px; fill: #eafcff; font-size: 15px; font-weight: 600; }
+.cmd-health-label { font-size: 15px; font-weight: 600; }
+
+/* tasks */
+.cmd-task { display: flex; gap: 9px; align-items: center; }
+.cmd-task-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--faint);
+  color: var(--accent);
+  font-size: 11px;
+}
+.cmd-task-main { flex: 1; min-width: 0; }
+.cmd-task-top { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 4px; white-space: nowrap; }
+.cmd-bar { height: 5px; border-radius: 3px; background: var(--faint); overflow: hidden; }
+.cmd-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #7af7ff); box-shadow: 0 0 8px var(--glow); transition: width 600ms ease; }
+.cmd-bar-fill.warn { background: linear-gradient(90deg, var(--warn), #ffd27a); }
+
+/* core */
+.cmd-core { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; }
+.cmd-core-plate {
+  pointer-events: auto;
+  text-align: center;
+  padding: 8px 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(2, 12, 22, 0.6);
+  box-shadow: 0 0 24px var(--faint);
+}
+.cmd-core-name { font-size: 22px; font-weight: 600; letter-spacing: 0.3em; color: #eafcff; text-shadow: 0 0 14px var(--glow); }
+.cmd-core-state { font-size: 10px; letter-spacing: 0.24em; }
+
+/* agents */
+.cmd-big-line { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+.cmd-big { font-size: 24px; font-weight: 600; color: #eafcff; }
+.cmd-agent { display: grid; grid-template-columns: 10px auto 1fr; gap: 8px; align-items: center; }
+.cmd-agent-name { white-space: nowrap; }
+.cmd-agent-detail { opacity: 0.55; font-size: 10px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.cmd-dot.paused { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.cmd-dot.off { background: var(--bad); box-shadow: none; }
+
+/* business */
+.cmd-money { font-size: 26px; font-weight: 600; color: #eafcff; }
+.cmd-kv { display: flex; justify-content: space-between; border-top: 1px solid var(--faint); padding-top: 6px; }
+.cmd-kv b { color: #eafcff; }
+
+/* crm funnel */
+.cmd-funnel { display: flex; flex-direction: column; gap: 6px; }
+.cmd-funnel-row { position: relative; display: flex; justify-content: space-between; align-items: center; height: 22px; padding: 0 8px; }
+.cmd-funnel-bar { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; opacity: 0.32; }
+.cmd-funnel-label, .cmd-funnel-row b { position: relative; }
+.c1 { background: #2f8cff; }
+.c2 { background: #00d4ff; }
+.c3 { background: #36e0a0; }
+.c4 { background: #ffd34d; }
+.c5 { background: #3dff6a; }
+
+/* youtube */
+.cmd-yt-name { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #fff; font-weight: 600; }
+.cmd-yt-logo { background: #ff2a2a; color: #fff; border-radius: 6px; padding: 1px 6px; font-size: 11px; }
+
+/* voice */
+.cmd-voice-row { display: flex; align-items: center; gap: 16px; }
+.cmd-mic {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  border: 1px solid var(--line);
+  box-shadow: 0 0 16px var(--faint);
+}
+.cmd-mic.live { box-shadow: 0 0 22px var(--glow); animation: cmd-pulse 1.4s ease-in-out infinite; }
+@keyframes cmd-pulse { 50% { box-shadow: 0 0 34px var(--glow); } }
+.cmd-voice-label { color: var(--accent); font-size: 12px; }
+
+/* command bar */
+.cmd-bar-area { display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; }
+.cmd-quick { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.cmd-quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.cmd-quick-btn span { color: var(--accent); }
+.cmd-quick-btn:hover { border-color: var(--accent); box-shadow: 0 0 14px var(--glow); }
+.cmd-input { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 16px; border-radius: 999px; }
+.cmd-input input {
+  flex: 1;
+  background: none;
+  border: 0;
+  outline: none;
+  color: #eafcff;
+  font: inherit;
+  font-size: 14px;
+}
+.cmd-input input::placeholder { color: color-mix(in srgb, var(--accent) 45%, #9bb); }
+.cmd-input-icon { color: var(--accent); }
+.cmd-send {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: #01131f;
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 0 16px var(--glow);
+}
+
+/* activity */
+.cmd-act { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; }
+.cmd-act-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* footer */
+.cmd-footer { text-align: center; font-size: 10px; letter-spacing: 0.18em; opacity: 0.6; align-self: center; }
+.cmd-footer span { color: var(--accent); margin: 0 6px; }
+
+/* The classic chrome steps aside while the Command Center is up. */
+.hud-command .corner,
+.hud-command .hud-top,
+.hud-command .rail,
+.hud-command .hud-bottom,
+.hud-command .suggest,
+.hud-command .deck { display: none; }
+.hud-command .log {
+  bottom: 196px;
+  width: min(560px, 34vw);
+  max-height: 34vh;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(transparent, #000 30%);
+  mask-image: linear-gradient(transparent, #000 30%);
+}
+.hud-command .caption { bottom: 200px; }
+.hud-command .tool-badge { top: 96px; }
+
+/* Laptop screens (1280-1440 wide, ~720-820 tall): tighten everything so the
+   panels fit without clipping and the reactor keeps some room. */
+@media (max-width: 1440px) {
+  .cmd {
+    grid-template-columns: 132px minmax(210px, 240px) 1fr minmax(200px, 220px) minmax(170px, 196px);
+    gap: 9px;
+    padding: 10px 12px 6px;
+  }
+  .cmd-brand-mark { font-size: 28px; }
+}
+@media (max-height: 820px) {
+  .cmd { grid-template-rows: 58px minmax(0, 1fr) minmax(0, 1fr) 118px 18px; font-size: 11px; }
+  .cmd-panel-head { padding: 6px 10px 4px; }
+  .cmd-panel-title { font-size: 11px; }
+  .cmd-panel-body { padding: 6px 10px 8px; gap: 5px; }
+  .cmd-brand-tag { display: none; }
+  .cmd-greet { margin: 4px 4%; }
+  .cmd-greet-text { font-size: 13px; }
+  .cmd-time { font-size: 17px; }
+  .cmd-nav-item { padding: 6px 8px; font-size: 11px; }
+  .cmd-ring { width: 54px; height: 54px; }
+  .cmd-health { gap: 10px; margin-top: 0; }
+  .cmd-health-label { font-size: 13px; }
+  .cmd-big { font-size: 19px; }
+  .cmd-money { font-size: 21px; }
+  .cmd-funnel { gap: 4px; }
+  .cmd-funnel-row { height: 19px; }
+  .cmd-task-icon { width: 18px; height: 18px; flex-basis: 18px; font-size: 10px; }
+  .cmd-mic { width: 44px; height: 44px; font-size: 18px; }
+  .cmd-quick-btn { padding: 5px 9px; font-size: 10px; }
+  .cmd-input { padding: 4px 4px 4px 14px; }
+  .cmd-send { width: 32px; height: 32px; }
+  .cmd-core-name { font-size: 18px; }
+  .cmd-core-plate { padding: 6px 26px; }
+  .hud-command .log { bottom: 150px; }
+  .hud-command .caption { bottom: 154px; }
+}
+
+/* Smaller screens: drop the outer columns, keep the essentials. */
+@media (max-width: 1180px) {
+  .cmd {
+    grid-template-columns: 130px minmax(220px, 280px) 1fr minmax(210px, 250px);
+    grid-template-areas:
+      'brand  greet  greet  clock'
+      'nav    status core   agents'
+      'nav    tasks  core   yt'
+      'voice  voice  cmd    recent'
+      'foot   foot   foot   foot';
+  }
+  .cmd-panel[style*='biz'],
+  .cmd-panel[style*='crm'] { display: none; }
+}
+@media (max-width: 860px) {
+  .cmd { display: none; }
+  .hud-command .hud-top, .hud-command .hud-bottom { display: flex; }
+}
+
+
+/* ------------------------------------------------------------ reference look */
+.cmd-panel { position: relative; }
+.cmd-panel::before,
+.cmd-panel::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--holo);
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px var(--accent));
+}
+.cmd-panel::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; border-top-left-radius: 8px; }
+.cmd-panel::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 8px; }
+.cmd-panel-title { color: var(--holo); text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); }
+.cmd-brand-mark { color: #dff6ff; }
+.cmd-nav-item.active { box-shadow: inset 3px 0 0 var(--holo), 0 0 14px color-mix(in srgb, var(--accent) 25%, transparent); }
+
+/* The 3D reactor becomes a soft halo behind the hologram. */
+[data-layout='command'] .scene { opacity: 0.32; }
+
+/* hologram */
+.cmd-core { position: relative; }
+.holo {
+  position: absolute;
+  inset: 0 0 56px;
+  width: 100%;
+  height: calc(100% - 56px);
+  pointer-events: none;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--holo) 70%, transparent));
+}
+.holo-mesh { fill: none; stroke: var(--holo); stroke-width: 0.55; opacity: 0.85; }
+.holo-mesh.back { opacity: 0.16; }
+.holo-eye { fill: #e8fbff; filter: drop-shadow(0 0 4px var(--holo)) drop-shadow(0 0 8px var(--accent)); }
+.holo-edge { fill: color-mix(in srgb, var(--accent) 8%, transparent); stroke: var(--holo); stroke-width: 0.8; }
+.holo-halo { fill: none; stroke: var(--accent); stroke-width: 0.4; stroke-dasharray: 2 3; opacity: 0.7; }
+.holo-line { fill: none; stroke: var(--accent); stroke-width: 0.45; opacity: 0.55; }
+.holo-orbit { fill: none; stroke: var(--holo); stroke-width: 0.6; opacity: 0.6; stroke-dasharray: 30 6 2 6; }
+.holo-orbit.dim { opacity: 0.25; stroke-dasharray: 3 5; }
+.holo-head { animation: holo-flicker 6s steps(1) infinite; }
+.holo.busy .holo-mesh { stroke: #9ff0ff; }
+@keyframes holo-flicker { 0%, 100% { opacity: 1; } 47% { opacity: 0.86; } 48% { opacity: 1; } 83% { opacity: 0.92; } }
+.cmd-core-plate { position: relative; z-index: 1; }
+
+/* The greeting bar already shows his last line; keep the bottom clear. */
+.hud-command .caption { display: none; }
+.hud-command .error { top: 96px; bottom: auto; }
+.hud-command .log { display: none; }

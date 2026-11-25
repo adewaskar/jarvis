@@ -107,7 +107,7 @@ const READ_VERB =
  * even though it sounds like a read.
  */
 const EFFECTFUL_VERB =
-  /(send|call|post|create|delete|remove|update|edit|write|install|launch|tap|swipe|press|type|buy|pay|charge|publish|deploy|outbound|download)/i
+  /(send|call|post|create|delete|remove|update|edit|write|install|launch|tap|swipe|press|type|buy|pay|charge|publish|deploy|outbound|download|upload)/i
 
 /**
  * Tools whose names trip the veto without deserving it.
@@ -206,7 +206,7 @@ const PATH_FIELDS = {
  * but JARVIS_FILE_ROOTS can widen the roots to the whole home directory, and a
  * page JARVIS has just read is exactly the thing that would ask for them.
  */
-const SECRET_DIRS = ['.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', '.claude', '.config/gh', '.config/gcloud']
+const SECRET_DIRS = ['.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', '.claude', '.config/gh', '.config/gcloud', '.jarvis/secrets']
 const SECRET_FILES = /^(\.env(\..*)?|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.claude\.json|id_[a-z0-9]+|.*\.(pem|key|p12|pfx|kdbx))$/i
 
 /**

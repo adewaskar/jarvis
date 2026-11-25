@@ -115,6 +115,18 @@ export const TTS_ENGINE: 'kokoro' | 'system' = choice(
 )
 
 /**
+ * HUD layout. `command` is the full Command Center dashboard (panels for
+ * system, tasks, agents, business, CRM, YouTube, voice, activity) around the
+ * reactor; `classic` is the original minimal HUD.
+ */
+export const HUD_LAYOUT: 'command' | 'classic' = choice(
+  'VITE_HUD_LAYOUT',
+  import.meta.env.VITE_HUD_LAYOUT,
+  ['command', 'classic'] as const,
+  'command',
+)
+
+/**
  * Which Kokoro voice. All four are British male:
  *   bm_george — measured RP baritone, closest to the character
  *   bm_fable  — warmer
@@ -136,9 +148,9 @@ export const env = {
   porcupineKey: str(import.meta.env.VITE_PICOVOICE_ACCESS_KEY) ?? '',
 }
 
-/** `claude-opus-5` is the strongest model; `claude-sonnet-5` trades a little
+/** `claude-opus-5-5` is the strongest model a subscription includes; `claude-fable-5-2` is stronger but bills usage credits. Trades a little
  *  quality for lower latency if you find responses feel slow on camera. */
-export const MODEL = 'claude-opus-5'
+export const MODEL = 'claude-opus-5-5'
 
 /**
  * Fast mode runs the same Opus 5 at up to 2.5x output speed. It is a research
