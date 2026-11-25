@@ -701,6 +701,13 @@ The publisher posts it automatically and respects the daily caps.`,
         if (!c) throw new Error('No channel with that id.')
         if (!c.niche) throw new Error('That channel has no niche yet.')
         if (creating) throw new Error('A video is being made right now. Try again when it is done.')
+        // It stands in for today's next unused slot, so the schedule does not
+        // make a second video straight after it.
+        const slot = (c.times ?? []).find((t) => s.lastRuns?.[slotKey(c, t)] !== today())
+        if (slot) {
+          s.lastRuns = { ...(s.lastRuns ?? {}), [slotKey(c, slot)]: today() }
+          db.write('settings', s)
+        }
         void runChannel(c, `${c.id} (on request)`)
         return { started: c.id, style: c.style, note: 'Running in the background. It will appear on http://localhost:8787/videos and in the queue when done.' }
       }),
