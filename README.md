@@ -49,3 +49,5 @@ The GitHub Actions workflow runs a production-dependency security audit, lint, P
 Release candidate: JARVIS 1.1.0. Its Windows installer is published only after the security audit, lint, build and test workflow succeeds.
 
 Windows build validation is enabled for this change through the repository's CI workflow.
+
+Build stamp: JARVIS 1.1.0 Windows x64 release candidate.
