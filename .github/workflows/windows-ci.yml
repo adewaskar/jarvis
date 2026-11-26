@@ -72,7 +72,7 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub Release
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-release]')
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-release]'))
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.1.0
