@@ -39,7 +39,7 @@ export type Panel = {
 export type Blade = {
   id: string
   title: string
-  kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'markup' | 'camera'
+  kind: 'article' | 'image' | 'gallery' | 'video' | 'audio' | 'embed' | 'markup' | 'camera'
   /** article / image / video / embed. */
   url?: string
   /** gallery. */

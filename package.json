@@ -1,8 +1,8 @@
 {
   "name": "jarvis",
   "private": true,
-  "version": "0.0.0",
-  "description": "A browser voice assistant with an Iron Man holographic interface, driven by Claude Code through a small Node bridge.",
+  "version": "1.1.0",
+  "description": "J.A.R.V.I.S. desktop voice assistant with 3D HUD, local bridge, multi-provider AI and MCP tools.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -11,13 +11,15 @@
   "scripts": {
     "start": "node scripts/start.mjs",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/build.mjs",
     "lint": "oxlint",
     "test": "node --test",
     "preview": "vite preview",
     "bridge": "node bridge/server.mjs",
     "bridge:writes": "node bridge/server.mjs --writes",
-    "setup": "node scripts/setup.mjs"
+    "setup": "node scripts/setup.mjs",
+    "desktop": "electron .",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
@@ -36,7 +38,8 @@
     "three": "^0.185.1",
     "ws": "^8.21.1",
     "zod": "^4.4.3",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.14",
+    "@modelcontextprotocol/client": "2.4.0"
   },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
@@ -49,6 +52,63 @@
     "oxlint": "^1.75.0",
     "tsx": "^4.23.1",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "electron": "45.4.1",
+    "electron-builder": "26.18.1"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.jarvis.desktop",
+    "productName": "J.A.R.V.I.S.",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "bridge/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "configure-provider.ps1",
+        "to": "configure-provider.ps1"
+      },
+      {
+        "from": "configure-media.ps1",
+        "to": "configure-media.ps1"
+      },
+      {
+        "from": "install-ollama.ps1",
+        "to": "install-ollama.ps1"
+      },
+      {
+        "from": "WINDOWS.md",
+        "to": "WINDOWS.md"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "JARVIS-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/claude-agent-sdk/**/*"
+    ]
   }
 }

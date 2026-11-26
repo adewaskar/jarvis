@@ -35,6 +35,8 @@ type Frame = {
   seconds?: number
   when?: string
   servers?: Array<string | { name?: string }>
+  provider?: string
+  model?: string
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
@@ -172,9 +174,13 @@ function dispatch(ws: WebSocket) {
       // The bridge announces immediately on connect from Claude Code's config,
       // then again with live status once the agent initialises. Keep listening
       // so the later, more accurate list wins.
-      servers = (msg.servers ?? [])
+      const reportedServers = (msg.servers ?? [])
         .map((s) => (typeof s === 'string' ? s : (s.name ?? '')))
-        .filter(Boolean)
+        .filter((name) => Boolean(name) && !name.startsWith('AI · '))
+      const providerLabel = msg.provider
+        ? `AI · ${msg.provider}${msg.model ? ' · ' + msg.model : ''}`
+        : ''
+      servers = [...(providerLabel ? [providerLabel] : []), ...reportedServers]
       onServers?.(servers)
       firstReady.resolve()
     } else if (msg.type === 'panel' && msg.panel) {

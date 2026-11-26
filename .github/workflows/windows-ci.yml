@@ -1,0 +1,116 @@
+name: Windows desktop build and verification
+
+on:
+  push:
+    branches: [main, jarvis-windows-executor, 'release/*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Production dependency security audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Parse Windows PowerShell helpers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @('install-windows.ps1', 'start-windows.ps1', 'configure-provider.ps1', 'configure-media.ps1', 'install-ollama.ps1')
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { throw "$file has PowerShell syntax errors: $($errors -join '; ')" }
+            Write-Host "PowerShell syntax OK: $file"
+          }
+
+      - name: Production build
+        run: npm run build
+
+      - name: Test suite
+        run: npm test
+
+      - name: Build Windows x64 NSIS installer
+        run: npm run dist:win
+
+      - name: Verify installer exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem -Path release -Filter "*.exe" -File
+          if (-not $installer) { throw "No Windows installer EXE was produced." }
+          $installer | ForEach-Object { Write-Host "$($_.Name) - $([math]::Round($_.Length / 1MB, 2)) MB" }
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-Windows-x64-Installer
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-release]')) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'Release JARVIS 1.1.0'))
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.0
+          target_commitish: ${{ github.sha }}
+          name: JARVIS 1.1.0 — Windows x64
+          body: |
+            ## JARVIS 1.1.0 — Windows x64
+
+            Instalador desktop para Windows 10/11 (64 bits).
+
+            ### Novidades
+            - Perfil gráfico automático: detecta recursos do computador e reduz a carga visual quando necessário, sem diminuir a qualidade das respostas.
+            - Conversa por texto e preservação do fluxo de voz.
+            - Geração de imagens com GPT Image e exportação de narração MP3 com ElevenLabs.
+            - Chaves de mídia configuradas separadamente do provedor de conversa; Ollama local continua disponível.
+
+            ### Instalação
+            1. Baixe e execute `JARVIS-Setup-1.1.0-x64.exe`.
+            2. Configure o provedor de IA no menu do JARVIS.
+            3. Para gerar imagens ou MP3, abra **Configurar geração de mídia...** e informe suas próprias chaves.
+
+            O modelo local é baixado separadamente. As APIs OpenAI e ElevenLabs podem cobrar pelo uso, conforme sua conta e plano.
+
+            ### Observações
+            - O instalador não é assinado por certificado comercial; o Windows pode exibir um aviso de editor desconhecido.
+            - O modelo Ollama não está incluído no instalador.
+            - As funcionalidades de mídia dependem de credenciais válidas e conexão com seus respectivos serviços.
+          files: release/*.exe
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          draft: false
+          prerelease: false
+          make_latest: true
+
+      - name: Upload production web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-web-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

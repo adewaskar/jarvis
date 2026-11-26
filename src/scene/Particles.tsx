@@ -8,8 +8,6 @@ import type { Drive } from './Scene'
  * pushed outward by loudness, so the whole cloud expands when JARVIS speaks.
  */
 
-const COUNT = 4000
-
 const vertex = /* glsl */ `
   uniform float uTime;
   uniform float uLevel;
@@ -69,15 +67,15 @@ const fragment = /* glsl */ `
   }
 `
 
-export function Particles({ drive }: { drive: Drive }) {
+export function Particles({ drive, count = 4000 }: { drive: Drive; count?: number }) {
   const mat = useRef<THREE.ShaderMaterial>(null)
   const pts = useRef<THREE.Points>(null)
 
   const { positions, seeds, radii } = useMemo(() => {
-    const positions = new Float32Array(COUNT * 3)
-    const seeds = new Float32Array(COUNT)
-    const radii = new Float32Array(COUNT)
-    for (let i = 0; i < COUNT; i++) {
+    const positions = new Float32Array(count * 3)
+    const seeds = new Float32Array(count)
+    const radii = new Float32Array(count)
+    for (let i = 0; i < count; i++) {
       // Even distribution on a sphere, then jittered into a shell.
       const u = Math.random() * 2 - 1
       const theta = Math.random() * Math.PI * 2
@@ -90,7 +88,7 @@ export function Particles({ drive }: { drive: Drive }) {
       radii[i] = (radius - 1.9) / 2.6
     }
     return { positions, seeds, radii }
-  }, [])
+  }, [count])
 
   const uniforms = useMemo(
     () => ({
