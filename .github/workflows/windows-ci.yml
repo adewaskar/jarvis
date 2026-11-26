@@ -83,16 +83,23 @@ jobs:
 
             Instalador desktop para Windows 10/11 (64 bits).
 
-            ### Instalação
-            1. Baixe e execute `JARVIS-Setup-1.0.0-x64.exe`.
-            2. Abra o JARVIS e use a opção de instalação do Ollama local.
-            3. Escolha o modelo Qwen3-VL 4B ou 2B e conclua a configuração.
+            ### Novidades
+            - Perfil gráfico automático: detecta recursos do computador e reduz a carga visual quando necessário, sem diminuir a qualidade das respostas.
+            - Conversa por texto e preservação do fluxo de voz.
+            - Geração de imagens com GPT Image e exportação de narração MP3 com ElevenLabs.
+            - Chaves de mídia configuradas separadamente do provedor de conversa; Ollama local continua disponível.
 
-            O modelo de IA é baixado separadamente durante a configuração. Provedores de nuvem são opcionais e podem exigir chave/API e cobrança próprias.
+            ### Instalação
+            1. Baixe e execute `JARVIS-Setup-1.1.0-x64.exe`.
+            2. Configure o provedor de IA no menu do JARVIS.
+            3. Para gerar imagens ou MP3, abra **Configurar geração de mídia...** e informe suas próprias chaves.
+
+            O modelo local é baixado separadamente. As APIs OpenAI e ElevenLabs podem cobrar pelo uso, conforme sua conta e plano.
 
             ### Observações
-            - O instalador não vem assinado por certificado comercial; o Windows pode exibir um aviso de editor desconhecido.
-            - O modelo local não está incluído no instalador.
+            - O instalador não é assinado por certificado comercial; o Windows pode exibir um aviso de editor desconhecido.
+            - O modelo Ollama não está incluído no instalador.
+            - As funcionalidades de mídia dependem de credenciais válidas e conexão com seus respectivos serviços.
           files: release/*.exe
           fail_on_unmatched_files: true
           overwrite_files: true

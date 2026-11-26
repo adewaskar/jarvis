@@ -146,7 +146,8 @@ function DecodeText({ text }: { text: string }) {
 
 /* --------------------------------------------------------------------- hud */
 
-export function Hud() {
+export function Hud({ onSubmitText }: { onSubmitText: (text: string) => void }) {
+  const [draft, setDraft] = useState('')
   const phase = useStore((s) => s.phase)
   const caption = useStore((s) => s.caption)
   const turns = useStore((s) => s.turns)
@@ -321,6 +322,22 @@ export function Hud() {
           )}
         </span>
       </footer>
+
+      {phase !== 'offline' && phase !== 'boot' && (
+        <form className="chat-composer" onSubmit={(event) => {
+          event.preventDefault()
+          const message = draft.trim()
+          if (!message) return
+          setDraft('')
+          onSubmitText(message)
+        }}>
+          <input className="chat-input" type="text" value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Digite sua mensagem para JARVIS..." aria-label="Mensagem para JARVIS"
+            autoComplete="off" maxLength={4000} />
+          <button className="chat-send" type="submit" disabled={!draft.trim()}>ENVIAR</button>
+        </form>
+      )}
 
       {/* Last, so a flash or a tear reads as being on the glass rather than
           underneath the chrome. It is pointer-events: none and unmounts the

@@ -1898,3 +1898,54 @@ kbd {
   transform: scaleX(-1);
   background: #000;
 }
+
+/* Text chat remains interactive above the non-interactive HUD glass. */
+.chat-composer {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; width: min(760px, 74vw);
+  min-height: 48px; padding: 7px 8px 7px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: 7px; background: rgba(2, 12, 18, 0.94);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--accent) 10%, transparent);
+  backdrop-filter: blur(10px); pointer-events: auto; z-index: 12;
+  text-transform: none; letter-spacing: normal;
+}
+.chat-input {
+  flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent;
+  color: #eaf9ff; font: 13px/1.4 system-ui, sans-serif;
+  text-transform: none; letter-spacing: normal;
+}
+.chat-input::placeholder { color: rgba(210, 235, 240, 0.42) }
+.chat-send {
+  flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 4px; padding: 9px 12px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: #dffcff; font: 600 9px/1 system-ui, sans-serif; letter-spacing: 0.12em; cursor: pointer;
+}
+.chat-send:disabled { opacity: 0.3; cursor: default }
+.bl-audio-wrap {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; width: 100%; height: 100%; min-height: 130px; padding: 24px;
+  background: rgba(0, 0, 0, 0.32);
+}
+.bl-audio-label { color: color-mix(in srgb, var(--accent) 90%, white); font-size: 9px; letter-spacing: 0.24em }
+.bl-audio { width: min(100%, 680px) }
+
+/* Lite graphics reduce GPU work, not AI model quality or reply detail. */
+html[data-jarvis-performance='lite'] body::after {
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(0, 0, 0, 0.42) 100%);
+}
+html[data-jarvis-performance='lite'] .fx,
+html[data-jarvis-performance='lite'] .blade-field { display: none !important }
+html[data-jarvis-performance='lite'] .chat-composer,
+html[data-jarvis-performance='lite'] .bl { backdrop-filter: none; box-shadow: none }
+html[data-jarvis-performance='lite'] .dot,
+html[data-jarvis-performance='lite'] .spinner { animation: none !important }
+html[data-jarvis-performance='lite'] .hud * { text-shadow: none !important; transition-duration: 100ms !important }
+html[data-jarvis-performance='lite'] .decode-ghost { display: none }
+@media (max-width: 720px) {
+  .chat-composer { width: 92vw; bottom: 10px; padding-left: 11px }
+  .chat-input { font-size: 12px }
+  .chat-send { padding: 9px 8px }
+  .hud-bottom { bottom: 66px }
+}

@@ -951,6 +951,95 @@ export function chromeServer({ allowWrites }) {
   })
 }
 
+
+
+/**
+ * Cross-provider entry point for the same Chrome extension transport.
+ *
+ * The original Claude MCP server below and the OpenAI-compatible provider
+ * agent now share these exact protocol wrappers, including active-tab
+ * recovery, page-settle checks and screenshot normalisation.
+ */
+export async function executeChromeTool(name, args = {}) {
+  if (name === 'chrome_status') {
+    const socket = await findSocket()
+    if (!socket) {
+      return {
+        text: 'The browser extension is not running. Open Chrome with the Claude extension enabled.',
+        isError: true,
+      }
+    }
+    const result = await forward('tabs_context_mcp', { needsTab: false })({ createIfEmpty: false })
+    return result
+  }
+  if (name === 'chrome_tabs') {
+    return forward('tabs_context_mcp', { needsTab: false })({
+      createIfEmpty: args.createIfEmpty === true,
+    })
+  }
+  if (name === 'chrome_navigate') {
+    const result = await forward('navigate')(args)
+    if (result.isError) return result
+    const url = String(args.url ?? '')
+    if (/^https?:\/\//i.test(url)) {
+      await settle(await resolveTab(args.tabId), url)
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+    }
+    return result
+  }
+  if (name === 'chrome_read_page') {
+    return forward('read_page')(args)
+  }
+  if (name === 'chrome_page_text') {
+    return forward('get_page_text')(args)
+  }
+  if (name === 'chrome_find') {
+    return forward('find')(args)
+  }
+  if (name === 'chrome_screenshot') {
+    return forward('computer')({ action: 'screenshot', ...args })
+  }
+  if (name === 'chrome_scroll') {
+    return forward('computer')({
+      action: 'scroll',
+      scroll_direction: args.direction ?? 'down',
+      scroll_amount: args.amount ?? 3,
+      coordinate: [400, 400],
+      ...(args.tabId !== undefined ? { tabId: args.tabId } : {}),
+    })
+  }
+  if (name === 'chrome_console') {
+    return forward('read_console_messages')(args)
+  }
+  if (name === 'chrome_network') {
+    return forward('read_network_requests')(args)
+  }
+  if (name === 'chrome_click') {
+    return forward('computer')({ action: 'left_click', ...args })
+  }
+  if (name === 'chrome_type') {
+    return forward('computer')({ action: 'type', ...args })
+  }
+  if (name === 'chrome_key') {
+    return forward('computer')({ action: 'key', ...args })
+  }
+  if (name === 'chrome_form_input') {
+    return forward('form_input')(args)
+  }
+  if (name === 'chrome_new_tab') {
+    const result = await forward('tabs_create_mcp', { needsTab: false })({})
+    if (!result.isError) activeTab = null
+    return result
+  }
+  if (name === 'chrome_close_tab') {
+    const result = await forward('tabs_close_mcp', { needsTab: false })(args)
+    if (Number(args.tabId) === activeTab) activeTab = null
+    return result
+  }
+  return { isError: true, text: 'Unknown Chrome operation: ' + name }
+}
+
 /** Whether the extension looks reachable, for the boot log. */
 export async function chromeAvailable() {
   return (await findSocket()) !== null

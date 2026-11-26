@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import {
   EffectComposer,
@@ -13,6 +13,7 @@ import { Core } from './Core'
 import { Particles } from './Particles'
 import { Orbits } from './Orbits'
 import { useStore, phaseColor, accentFor, type Phase } from '../store'
+import { detectBrowserPerformanceProfile, detectPerformanceProfile, downgradePerformanceProfile, type GraphicsProfile } from '../lib/performance'
 
 /** Rings spin harder while JARVIS is working — reads as effort. */
 const spinFor: Record<Phase, number> = {
@@ -106,7 +107,7 @@ function aim(tint: Tint, css: string): THREE.Color {
 
 const STYLE_INDEX = { ring: 0, sphere: 1, wire: 2 } as const
 
-function Rig() {
+function Rig({ particleCount }: { particleCount: number }) {
   const drive = useMemo<Drive>(
     () => ({
       color: new THREE.Color(phaseColor.offline),
@@ -186,55 +187,65 @@ function Rig() {
   return (
     <>
       <Core drive={drive} />
-      <Particles drive={drive} />
+      <Particles drive={drive} count={particleCount} />
       <Orbits />
     </>
   )
 }
 
 export function Scene() {
+  const [profile, setProfile] = useState<GraphicsProfile>(() => detectBrowserPerformanceProfile())
+  useEffect(() => {
+    let live = true
+    void detectPerformanceProfile().then((next) => { if (live) setProfile(next) })
+    return () => { live = false }
+  }, [])
+  useEffect(() => {
+    document.documentElement.dataset.jarvisPerformance = profile.tier
+    return () => { delete document.documentElement.dataset.jarvisPerformance }
+  }, [profile.tier])
+  // Two consecutive low-FPS windows lower only the visual workload.
+  useEffect(() => {
+    let raf = 0
+    let started = 0
+    let frames = 0
+    let slowWindows = 0
+    const sample = (now: number) => {
+      if (document.visibilityState === 'visible') {
+        if (!started) started = now
+        frames += 1
+        if (now - started >= 5000) {
+          const fps = (frames * 1000) / (now - started)
+          slowWindows = fps < 28 ? slowWindows + 1 : Math.max(0, slowWindows - 1)
+          if (slowWindows >= 2) {
+            setProfile((current) => downgradePerformanceProfile(current))
+            slowWindows = 0
+          }
+          started = now
+          frames = 0
+        }
+      } else { started = 0; frames = 0 }
+      raf = requestAnimationFrame(sample)
+    }
+    raf = requestAnimationFrame(sample)
+    return () => cancelAnimationFrame(raf)
+  }, [])
   return (
     <Canvas
       className="scene"
       camera={{ position: [0, 0, 6.2], fov: 45 }}
-      gl={{ antialias: true, alpha: true }}
-      dpr={[1, 2]}
+      gl={{ antialias: false, alpha: true, powerPreference: profile.tier === 'lite' ? 'low-power' : 'high-performance' }}
+      dpr={profile.dpr}
     >
-      <Rig />
-      {/*
-        multisampling={0} on purpose. The default is 8, which allocates a
-        half-float MSAA target — at dpr 2 that is a 3200x1800 buffer — and there
-        is not one polygon edge in this scene for it to smooth: everything is
-        additive blobs, point sprites and lines, all of which are already
-        soft-edged by their own falloff and then blurred again by bloom.
-
-        Tone mapping is also deliberate, if less obviously so. EffectComposer
-        forces gl.toneMapping to NoToneMapping while it is mounted (there is no
-        prop for it), so the additive output clips instead of rolling off. That
-        hard clip to white is the neon look this piece wants — the sweep and the
-        rim are meant to blow out. If you ever want the filmic roll-off back,
-        add a <ToneMapping mode={ToneMappingMode.ACES_FILMIC} /> effect at the
-        end of this chain rather than touching the renderer.
-      */}
-      <EffectComposer multisampling={0}>
-        {/* Bloom is what turns additive lines into "hologram". */}
-        <Bloom
-          intensity={1.15}
-          // A higher threshold keeps the mid-tones intact so the orb doesn't
-          // flatten into a solid white disc.
-          luminanceThreshold={0.22}
-          luminanceSmoothing={0.85}
-          mipmapBlur
-          radius={0.72}
-        />
-        <ChromaticAberration
-          offset={new THREE.Vector2(0.0009, 0.0012)}
-          radialModulation={false}
-          modulationOffset={0}
-        />
-        <Noise opacity={0.035} blendFunction={BlendFunction.OVERLAY} />
-        <Vignette eskil={false} offset={0.22} darkness={0.95} />
-      </EffectComposer>
+      <Rig particleCount={profile.particles} />
+      {profile.postProcessing && (
+        <EffectComposer multisampling={0}>
+          <Bloom intensity={1.15} luminanceThreshold={0.22} luminanceSmoothing={0.85} mipmapBlur radius={0.72} />
+          <ChromaticAberration offset={new THREE.Vector2(0.0009, 0.0012)} radialModulation={false} modulationOffset={0} />
+          <Noise opacity={0.035} blendFunction={BlendFunction.OVERLAY} />
+          <Vignette eskil={false} offset={0.22} darkness={0.95} />
+        </EffectComposer>
+      )}
     </Canvas>
   )
 }

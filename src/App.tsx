@@ -700,7 +700,7 @@ export default function App() {
   return (
     <>
       <Scene />
-      <Hud />
+      <Hud onSubmitText={(message) => void respond(message)} />
       <Boot />
       <Diagnostics />
       <Ignition onStart={() => void powerOn()} />

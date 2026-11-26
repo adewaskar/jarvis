@@ -44,6 +44,7 @@ import * as camera from '../lib/camera'
  */
 const DISK_PATH =
   /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
+const WINDOWS_DISK_PATH = /^[a-zA-Z]:[\\/]/
 
 /** Route a source through the bridge, which is the only origin that can
  *  actually fetch it — and the only one the page CSP will load from. */
@@ -51,7 +52,7 @@ function viaBridge(raw: string, route: 'img' | 'media'): string {
   const src = String(raw ?? '').trim()
   if (!src) return ''
   const path = src.replace(/^file:\/\//, '')
-  if (DISK_PATH.test(path)) {
+  if (DISK_PATH.test(path) || WINDOWS_DISK_PATH.test(path)) {
     return `${BRIDGE_HTTP_URL}/file?path=${encodeURIComponent(path)}`
   }
   if (!/^https?:\/\//i.test(src)) return src
@@ -207,6 +208,15 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
         playsInline
         preload="metadata"
       />
+    )
+  }
+
+  if (blade.kind === 'audio' && blade.url) {
+    return (
+      <div className="bl-audio-wrap">
+        <div className="bl-audio-label">ÁUDIO GERADO</div>
+        <audio className="bl-audio" src={viaBridge(blade.url, 'media')} controls preload="metadata" />
+      </div>
     )
   }
 
